@@ -24,7 +24,6 @@ SETUP:
 (4) Add this callback to spotify API portal as well
 (5) You are good to go!
 */
-#include <SPI.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SH110X.h>
@@ -37,7 +36,6 @@ SETUP:
 #include <HTTPClient.h>
 #include <WebServer.h>
 #include <WiFiClientSecure.h>
-#include <ssl_client.h>
 
 // Load tabs attached to this sketch
 #include "index.h"
