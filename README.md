@@ -15,6 +15,22 @@
 </p>
 
 A Physical Spotify Controller using an ESP32, 3 Buttons, Rotary Encoder and a 128x64 OLED Screen (SH1106). 
+<br/> <br/>
+## User Guide
+1. Plug the ESP to Power
+2. Navigate to the ESP_IP and login to Your Spotify Account
+3. Your Device should now be able to Control Music!
+  
+<br /><br />
+## Setup
+You need to have an application on the Spotify API Dashboard. Make sure that it has Web API enabled. You need to make the following modifications to the provided code:
+  1. Change SSID and Password (line 45)
+  2. Change Client Secret and ID (Spotify Web API Credentials) (line 49)
+  3.  Run the program, You can see your ESPs IP on Serial Monitor (9600 Baud Rate) and on the OLED.
+    You need to add the IP address of your ESP to REDIRECT_URI definition (line 51):
+          http://YOUR_ESP_IP/callback
+
+Now you need to add this Redirect URI to the Spotify App as well. After that is done, upload the updated code to the ESP and you are good to go!
 <br /><br />
 ## Wiring
 ##### OLED <br />
@@ -30,19 +46,8 @@ SDA -> D21
   CLK -> D4 <br />
   DT  -> D2 <br />
   SW  -> D15
-  
 <br /><br />
-## Setup
-1. Change SSID and Password (line 45)
-2. Change Client Secret and ID (Spotify Web API Credentials) (line 49)
-3.  Run the program, You can see your ESPs IP on Serial Monitor (9600 Baud Rate) and on the OLED.
-    You need to add the IP address of your ESP to REDIRECT_URI definition (line 51):
-          http://YOUR_ESP_IP/callback
-4. Add this callback to spotify API portal as well
-5. Upload the updated code to the ESP
-6. You're good to go!
 
-<br /><br />
 ## Dependencies
 *	adafruit/Adafruit GFX Library@^1.12.0
 * adafruit/Adafruit SH110X@^2.1.12
@@ -50,5 +55,6 @@ SDA -> D21
 * bblanchon/ArduinoJson@^7.4.1
 * arduinogetstarted/ezButton@^1.0.6
 
-
+## Credits
+* Heavily inspired by [MakeItForLess's Spotify Player](https://gitlab.com/makeitforless/spotify_controller)
 
