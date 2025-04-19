@@ -34,14 +34,21 @@ SDA -> D21
 <br /><br />
 ## Setup
 1. Change SSID and Password (line 45)
-2. Change Client Secret and ID (49)
-3. Run the program, Serial monitor will output your ESPs IP.
-    the IP address of your ESP should be in callback (line 51):
+2. Change Client Secret and ID (Spotify Web API Credentials) (line 49)
+3.  Run the program, You can see your ESPs IP on Serial Monitor (9600 Baud Rate) and on the OLED.
+    You need to add the IP address of your ESP to REDIRECT_URI definition (line 51):
           http://YOUR_ESP_IP/callback
 4. Add this callback to spotify API portal as well
-5. You are good to go!
+5. Upload the updated code to the ESP
+6. You're good to go!
 
 <br /><br />
-## Built With
-* Spotify Web API
-* Adafruit GFX Library
+## Dependencies
+*	adafruit/Adafruit GFX Library@^1.12.0
+* adafruit/Adafruit SH110X@^2.1.12
+* madhephaestus/ESP32Encoder@^0.11.7
+* bblanchon/ArduinoJson@^7.4.1
+* arduinogetstarted/ezButton@^1.0.6
+
+
+
