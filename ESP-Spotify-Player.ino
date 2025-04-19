@@ -1,12 +1,12 @@
-/*DIY ESP Spotify Player
-- Kaustubh Doval
+/*ESP Spotify Player V1
+- By Kaustubh Doval
 
 OLED: 128x64
   SCK -> D22
   SDA -> D21
 
 Buttons
-  previous button   -> D5 
+  previous button   -> D5
   play/pause button -> D18
   next button       -> D19
 
@@ -15,13 +15,13 @@ Rotary Encoder
   DT  -> D2
   SW  -> D15
 
-SETUP: 
+SETUP:
 (1) Change SSID and Password (line 45)
 (2) Change Client Secret and ID (49)
-(3) Run the program, Serial monitor will output your ESPs IP.
-    the IP address of your ESP should be in callback (line 51):
+(3) Run the program, You can see your ESPs IP on Serial Monitor (9600 Baud Rate) and on the OLED.
+    You need to add the IP address of your ESP to REDIRECT_URI definition (line 51):
           http://YOUR_ESP_IP/callback
-(4) Add this callback to spotify API portal as well
+(4) Add this callback to Spotify Web API portal as well (ensure that it is exactly the same as REDIRECT_URI)
 (5) You are good to go!
 */
 #include <Wire.h>
@@ -30,6 +30,7 @@ SETUP:
 #include <ESP32Encoder.h>
 #include <ArduinoJson.h>
 #include <base64.h>
+#include <ezButton.h>
 
 // Include WiFi and http client
 #include <WiFi.h>
@@ -41,116 +42,60 @@ SETUP:
 #include "index.h"
 
 // WiFi credentials
-#define WIFI_SSID "YOUR_WIFI_SSID"
-#define PASSWORD "YOUR_WIFI_PASSWORD"
+#define WIFI_SSID "WIFI_SSID"
+#define PASSWORD "WIFI_PASSWORD"
 
 // Spotify API credentials
 #define CLIENT_ID "SPOTIFY_CLIENT_ID"
 #define CLIENT_SECRET "SPOTIFY_CLIENT_SECRET"
 #define REDIRECT_URI "http://YOUR_ESP_IP/callback"
 
+// Pin Definitions
+#define PREV_BTN_PIN 5
+#define PLAY_BTN_PIN 18
+#define NEXT_BTN_PIN 19
+#define ENC_CLK_PIN 4
+#define ENC_DT_PIN 2
+#define ENC_SW_PIN 15
 
-//Pin Definitions
-#define prev_btn_pin 5
-#define play_btn_pin 18
-#define next_btn_pin 19
-#define enc_clk_pin 4
-#define enc_dt_pin 2
-#define enc_sw_pin 15
+// OLED Definitions
+#define I2C_ADDRESS 0x3c
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
 
-//OLED Definitions
-#define I2C_ADDRESS 0x3c  //If diff OLED, this might be diff use i2c scanner
-#define SCREEN_WIDTH 128  // OLED display width, in pixels
-#define SCREEN_HEIGHT 64  // OLED display height, in pixels
-#define OLED_RESET -1     //   QT-PY / XIAO
+// Timing constants
+#define API_REFRESH_INTERVAL 5000 // 5 seconds
+#define VOLUME_UPDATE_THRESHOLD 2 // Minimum volume change to update
 
-//Create OLED Object
+// Some Bitmap Definitions
+static const unsigned char PROGMEM no_active_device[] = {0x07, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xf8, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0xff, 0xff, 0xff, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0xe0, 0x07, 0xce, 0x78, 0x03, 0x80, 0x00, 0x41, 0x02, 0x00, 0x01, 0x00, 0x7c, 0x01, 0xe0, 0x04, 0x11, 0x44, 0x04, 0x40, 0x00, 0x40, 0x05, 0x00, 0x01, 0x00, 0x44, 0x01, 0xe0, 0x04, 0x10, 0x44, 0x04, 0x16, 0x39, 0xf3, 0x04, 0x44, 0x01, 0x00, 0x7c, 0x01, 0xe0, 0x07, 0x8e, 0x78, 0x03, 0x99, 0x44, 0x41, 0x0e, 0x44, 0x01, 0x00, 0x7c, 0x01, 0xe0, 0x04, 0x01, 0x40, 0x00, 0x59, 0x44, 0x41, 0x04, 0x3c, 0x01, 0x00, 0x7c, 0x01, 0xe0, 0x04, 0x11, 0x40, 0x04, 0x56, 0x44, 0x51, 0x04, 0x04, 0x01, 0x00, 0x00, 0x01, 0xe0, 0x07, 0xce, 0x40, 0x03, 0x90, 0x38, 0x23, 0x84, 0x44, 0x01, 0x00, 0x00, 0x01, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x38, 0x01, 0x1f, 0xff, 0x9f, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x10, 0x00, 0x91, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0xf0, 0x00, 0xf1, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0xe0, 0x00, 0x00, 0x0f, 0x18, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x7c, 0x01, 0xe0, 0x00, 0x00, 0x08, 0x88, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x7c, 0x01, 0xe0, 0x00, 0x00, 0x08, 0x88, 0x62, 0x27, 0x2c, 0x00, 0x00, 0x01, 0x00, 0x7c, 0x01, 0xe0, 0x00, 0x00, 0x0f, 0x08, 0x12, 0x28, 0xb2, 0x00, 0x00, 0x01, 0x00, 0x44, 0x01, 0xe0, 0x00, 0x00, 0x08, 0x08, 0x71, 0xef, 0xa0, 0x00, 0x00, 0x01, 0x00, 0x7c, 0x01, 0xe0, 0x00, 0x00, 0x08, 0x08, 0x90, 0x28, 0x20, 0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0xe0, 0x00, 0x00, 0x08, 0x1c, 0x7a, 0x27, 0x20, 0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x01, 0xc0, 0x00, 0x00, 0x00, 0x01, 0xff, 0xff, 0xff, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0xff, 0xff, 0xfe, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0xff, 0xff, 0xfc, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0xf8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xf8, 0x00, 0x00, 0x00, 0x3f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xf0, 0x00, 0x00, 0x00, 0x1f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x20, 0x00, 0x20, 0x02, 0x08, 0x00, 0x00, 0x3c, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02, 0x20, 0x00, 0x50, 0x02, 0x00, 0x00, 0x00, 0x22, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x27, 0x00, 0x89, 0xcf, 0x98, 0x89, 0xc0, 0x22, 0x72, 0x26, 0x1c, 0x70, 0x00, 0x02, 0xa8, 0x80, 0x8a, 0x22, 0x08, 0x8a, 0x20, 0x22, 0x8a, 0x22, 0x22, 0x88, 0x00, 0x02, 0x68, 0x80, 0xfa, 0x02, 0x08, 0x8b, 0xe0, 0x22, 0xfa, 0x22, 0x20, 0xf8, 0x00, 0x02, 0x28, 0x80, 0x8a, 0x22, 0x88, 0x52, 0x00, 0x22, 0x81, 0x42, 0x22, 0x80, 0x00, 0x02, 0x27, 0x00, 0x89, 0xc1, 0x1c, 0x21, 0xc0, 0x3c, 0x70, 0x87, 0x1c, 0x70, 0x00};
+static const unsigned char PROGMEM splash_screen[] = {0x07, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xf8, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0xff, 0xff, 0xff, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0xe0, 0x07, 0xce, 0x78, 0x03, 0x80, 0x00, 0x41, 0x02, 0x00, 0x01, 0x00, 0x7c, 0x01, 0xe0, 0x04, 0x11, 0x44, 0x04, 0x40, 0x00, 0x40, 0x05, 0x00, 0x01, 0x00, 0x44, 0x01, 0xe0, 0x04, 0x10, 0x44, 0x04, 0x16, 0x39, 0xf3, 0x04, 0x44, 0x01, 0x00, 0x7c, 0x01, 0xe0, 0x07, 0x8e, 0x78, 0x03, 0x99, 0x44, 0x41, 0x0e, 0x44, 0x01, 0x00, 0x7c, 0x01, 0xe0, 0x04, 0x01, 0x40, 0x00, 0x59, 0x44, 0x41, 0x04, 0x3c, 0x01, 0x00, 0x7c, 0x01, 0xe0, 0x04, 0x11, 0x40, 0x04, 0x56, 0x44, 0x51, 0x04, 0x04, 0x01, 0x00, 0x00, 0x01, 0xe0, 0x07, 0xce, 0x40, 0x03, 0x90, 0x38, 0x23, 0x84, 0x44, 0x01, 0x00, 0x00, 0x01, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x38, 0x01, 0x1f, 0xff, 0x9f, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x10, 0x00, 0x91, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0xf0, 0x00, 0xf1, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0xe0, 0x00, 0x00, 0x0f, 0x18, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x7c, 0x01, 0xe0, 0x00, 0x00, 0x08, 0x88, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x7c, 0x01, 0xe0, 0x00, 0x00, 0x08, 0x88, 0x62, 0x27, 0x2c, 0x00, 0x00, 0x01, 0x00, 0x7c, 0x01, 0xe0, 0x00, 0x00, 0x0f, 0x08, 0x12, 0x28, 0xb2, 0x00, 0x00, 0x01, 0x00, 0x44, 0x01, 0xe0, 0x00, 0x00, 0x08, 0x08, 0x71, 0xef, 0xa0, 0x00, 0x00, 0x01, 0x00, 0x7c, 0x01, 0xe0, 0x00, 0x00, 0x08, 0x08, 0x90, 0x28, 0x20, 0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0xe0, 0x00, 0x00, 0x08, 0x1c, 0x7a, 0x27, 0x20, 0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x01, 0xc0, 0x00, 0x00, 0x00, 0x01, 0xff, 0xff, 0xff, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0xff, 0xff, 0xfe, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0xff, 0xff, 0xfc, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0xf8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xf8, 0x00, 0x00, 0x00, 0x3f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xf0, 0x00, 0x00, 0x00, 0x1f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x02, 0x20, 0x00, 0x00, 0x80, 0x20, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x80, 0x02, 0x40, 0x00, 0x00, 0x80, 0x20, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0xa2, 0x02, 0x86, 0x22, 0x7b, 0xe8, 0xac, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0f, 0x22, 0x03, 0x01, 0x22, 0x80, 0x88, 0xb2, 0xc8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x9e, 0x02, 0x87, 0x22, 0x70, 0x88, 0xa2, 0x88, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x82, 0x02, 0x49, 0x26, 0x08, 0xa9, 0xb2, 0x88, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0f, 0x22, 0x02, 0x27, 0x9a, 0xf0, 0x46, 0xac, 0x88, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+static const unsigned char PROGMEM configuring[] = {0x80, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc1, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x42, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x22, 0x8c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x13, 0x0c, 0x07, 0x00, 0x00, 0x42, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x0a, 0xb4, 0x08, 0x80, 0x00, 0xa0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x48, 0x08, 0x1c, 0xb0, 0x86, 0x1c, 0x8a, 0xc6, 0x2c, 0x70, 0x00, 0x00, 0x05, 0xf0, 0x08, 0x22, 0xc9, 0xc2, 0x26, 0x8b, 0x22, 0x32, 0x98, 0x00, 0x00, 0x0b, 0x00, 0x08, 0x22, 0x88, 0x82, 0x26, 0x8a, 0x02, 0x22, 0x98, 0x00, 0x00, 0x14, 0xe0, 0x08, 0xa2, 0x88, 0x82, 0x1a, 0x9a, 0x02, 0x22, 0x68, 0xc3, 0x0c, 0x29, 0xb0, 0x07, 0x1c, 0x88, 0x87, 0x02, 0x6a, 0x07, 0x22, 0x08, 0xc3, 0x0c, 0x50, 0xd8, 0x00, 0x00, 0x00, 0x00, 0x1c, 0x00, 0x00, 0x00, 0x70, 0x00, 0x00, 0xa0, 0x6c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0x34, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+
+// Create OLED Object
 Adafruit_SH1106G display = Adafruit_SH1106G(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
-//Rotary Encoder Object
+// Rotary Encoder Object
 ESP32Encoder encoder;
 
-//Wifi Objects
+// Wifi Objects
 WiFiClientSecure secureClient;
 HTTPClient https;
-WebServer server(80);  //Server on port 80
+WebServer server(80);
 
-//Variables
-bool isPlaying;  //if state = 0 -> Paused, if state = 1 -> Playing
-int volume;
+// Button Objects
+ezButton prevBtn(PREV_BTN_PIN);
+ezButton playBtn(PLAY_BTN_PIN);
+ezButton nextBtn(NEXT_BTN_PIN);
+ezButton encSwBtn(ENC_SW_PIN);
 
-int play_btn_prevstate = HIGH;
-int prev_btn_prevstate = HIGH;
-int next_btn_prevstate = HIGH;
-int prev_btn_state;
-int play_btn_state;
-int next_btn_state;
+// Timing variables
+unsigned long lastApiRefresh = 0;
 
-int sw_btn_prevstate = HIGH;
-int sw_btn_state;
-
-void change_state();
-void prev_song();
-void next_song();
-
-String getValue(HTTPClient &http, String key) {
-  bool found = false, look = false, seek = true;
-  int ind = 0;
-  String ret_str = "";
-
-  int len = http.getSize();
-  char char_buff[1];
-  WiFiClient *stream = http.getStreamPtr();
-  while (http.connected() && (len > 0 || len == -1)) {
-    size_t size = stream->available();
-    // Serial.print("Size: ");
-    // Serial.println(size);
-    if (size) {
-      int c = stream->readBytes(char_buff, ((size > sizeof(char_buff)) ? sizeof(char_buff) : size));
-      if (found) {
-        if (seek && char_buff[0] != ':') {
-          continue;
-        } else if (char_buff[0] != '\n') {
-          if (seek && char_buff[0] == ':') {
-            seek = false;
-            int c = stream->readBytes(char_buff, 1);
-          } else {
-            ret_str += char_buff[0];
-          }
-        } else {
-          break;
-        }
-
-        // Serial.print("get: ");
-        // Serial.println(get);
-      } else if ((!look) && (char_buff[0] == key[0])) {
-        look = true;
-        ind = 1;
-      } else if (look && (char_buff[0] == key[ind])) {
-        ind++;
-        if (ind == key.length()) found = true;
-      } else if (look && (char_buff[0] != key[ind])) {
-        ind = 0;
-        look = false;
-      }
-    }
-  }
-  //   Serial.println(*(ret_str.end()));
-  //   Serial.println(*(ret_str.end()-1));
-  //   Serial.println(*(ret_str.end()-2));
-  if (*(ret_str.end() - 1) == ',') {
-    ret_str = ret_str.substring(0, ret_str.length() - 1);
-  }
-  return ret_str;
-}
-
-//http response struct
-struct httpResponse {
-  int responseCode;
-  String responseMessage;
-};
-
-struct songDetails {
+// Song details struct
+struct SongDetails
+{
   int durationMs;
   String album;
   String artist;
@@ -159,476 +104,645 @@ struct songDetails {
   bool isLiked;
 };
 
+// Forward declarations
+String truncateString(const String &input, int maxLength);
+void handleButtons();
+void handleVolumeControl();
+void handleRoot();
+void handleCallbackPage();
 
-//Create spotify connection class
-//Code 'inspired' from Make it for Less
-class SpotConn {
+// Spotify Connection Class
+class SpotConn
+{
 public:
-  SpotConn() {
-    // Set up WiFiClientSecure for SSL
-    secureClient.setInsecure();  // Insecure means it won't validate SSL certificates
+  SpotConn()
+  {
+    secureClient.setInsecure();
+    secureClient.setTimeout(10000); // 10 second timeout
   }
 
-  bool getUserCode(String serverCode) {
+  bool getUserCode(const String &serverCode)
+  {
+    JsonDocument doc;
+
     https.begin(secureClient, "https://accounts.spotify.com/api/token");
     String auth = "Basic " + base64::encode(String(CLIENT_ID) + ":" + String(CLIENT_SECRET));
     https.addHeader("Authorization", auth);
     https.addHeader("Content-Type", "application/x-www-form-urlencoded");
-    https.addHeader("Content-Length", "0");  // Add Content-Length header
-    String requestBody = "grant_type=authorization_code&code=" + serverCode + "&redirect_uri=" + String(REDIRECT_URI);
 
-    // Send the POST request to the Spotify API
+    String requestBody = "grant_type=authorization_code&code=" + serverCode + "&redirect_uri=" + String(REDIRECT_URI);
     int httpResponseCode = https.POST(requestBody);
 
-    if (httpResponseCode == HTTP_CODE_OK) {
+    if (httpResponseCode == HTTP_CODE_OK)
+    {
       String response = https.getString();
-      DynamicJsonDocument doc(1024);
-      deserializeJson(doc, response);
-      accessToken = String((const char *)doc["access_token"]);
-      refreshToken = String((const char *)doc["refresh_token"]);
-      tokenExpireTime = doc["expires_in"];
+      DeserializationError error = deserializeJson(doc, response);
+
+      if (error)
+      {
+        Serial.print("JSON parse failed: ");
+        Serial.println(error.c_str());
+        https.end();
+        return false;
+      }
+
+      accessToken = doc["access_token"].as<String>();
+      refreshToken = doc["refresh_token"].as<String>();
+      tokenExpireTime = doc["expires_in"].as<int>();
       tokenStartTime = millis();
       accessTokenSet = true;
-      Serial.println(accessToken);
-      Serial.println(refreshToken);
-    } else {
-      Serial.print("Error: ");
+
+      Serial.println("Access token: " + accessToken);
+      Serial.println("Refresh token: " + refreshToken);
+    }
+    else
+    {
+      Serial.print("ERROR WHILE GETTING USER CODE: ");
       Serial.println(httpResponseCode);
-      Serial.println(https.getString());  // Print the error response from Spotify
+      Serial.println(https.getString());
       https.end();
-      return false;  // Early exit on failure
+      return false;
     }
 
-    // Disconnect from the Spotify API
     https.end();
     return accessTokenSet;
   }
 
-  bool refreshAuth() {
+  bool refreshAuth()
+  {
+    JsonDocument doc;
+
     https.begin(secureClient, "https://accounts.spotify.com/api/token");
     String auth = "Basic " + base64::encode(String(CLIENT_ID) + ":" + String(CLIENT_SECRET));
     https.addHeader("Authorization", auth);
     https.addHeader("Content-Type", "application/x-www-form-urlencoded");
-    https.addHeader("Content-Length", "0");  // Add Content-Length header
 
-    String requestBody = "grant_type=refresh_token&refresh_token=" + String(refreshToken);
+    String requestBody = "grant_type=refresh_token&refresh_token=" + refreshToken;
     int httpResponseCode = https.POST(requestBody);
 
     accessTokenSet = false;
 
-    if (httpResponseCode == HTTP_CODE_OK) {
+    if (httpResponseCode == HTTP_CODE_OK)
+    {
       String response = https.getString();
-      DynamicJsonDocument doc(1024);
-      deserializeJson(doc, response);
-      accessToken = String((const char *)doc["access_token"]);
+      DeserializationError error = deserializeJson(doc, response);
 
-      if (doc.containsKey("refresh_token")) {
+      if (error)
+      {
+        Serial.print("JSON parse failed: ");
+        Serial.println(error.c_str());
+        https.end();
+        return false;
+      }
+
+      accessToken = doc["access_token"].as<String>();
+
+      // If refresh_token is present, update it
+      if (!doc["refresh_token"].isNull())
+      {
         refreshToken = doc["refresh_token"].as<String>();
       }
 
-      tokenExpireTime = doc["expires_in"];
+      tokenExpireTime = doc["expires_in"].as<int>();
       tokenStartTime = millis();
       accessTokenSet = true;
-      Serial.println(accessToken);
-      Serial.println(refreshToken);
-    } else {
-      Serial.print("Error: ");
+
+      Serial.println("Refreshed access token: " + accessToken);
+    }
+    else
+    {
+      Serial.print("Error refreshing token: ");
       Serial.println(httpResponseCode);
-      Serial.println(https.getString());  // Print the error response from Spotify
+      Serial.println(https.getString());
       https.end();
-      return false;  // Early exit on failure
+      return false;
     }
 
     https.end();
     return accessTokenSet;
   }
 
-  bool getTrackInfo() {
-    String url = "https://api.spotify.com/v1/me/player/currently-playing";
+  bool getTrackInfo()
+  {
+    JsonDocument doc;
+
     https.useHTTP10(true);
-    https.begin(secureClient, url);
-    String auth = "Bearer " + String(accessToken);
-    https.addHeader("Authorization", auth);
-    https.addHeader("Content-Length", "0");  // Add Content-Length header
+    https.begin(secureClient, "https://api.spotify.com/v1/me/player");
+    https.addHeader("Authorization", "Bearer " + accessToken);
+
     int httpResponseCode = https.GET();
     bool success = false;
-    String songId = "";
-    bool refresh = false;
-    // Check if the request was successful
-    if (httpResponseCode == 200) {
-      String currentSongProgress = getValue(https, "progress_ms");
-      currentSongPositionMs = currentSongProgress.toFloat();
 
+    if (httpResponseCode == 200)
+    {
+      // Serial.println("JSON response received:");
+      String input = https.getString();
+      DeserializationError error = deserializeJson(doc, input);
 
-      String artistName = getValue(https, "name");
-      String songDuration = getValue(https, "duration_ms");
-      currentSong.durationMs = songDuration.toInt();
-      String songName = getValue(https, "name");
-      songId = getValue(https, "uri");
-      String isPlay = getValue(https, "is_playing");
-      isPlaying = (isPlay == "true");
-      Serial.println(isPlay);
-      // Serial.println(songId);
-      songId = songId.substring(15, songId.length() - 1);
-      // Serial.println(songId);
-      https.end();
+      if (error)
+      {
+        Serial.print(F("deserializeJson() failed: "));
+        Serial.println(error.f_str());
+        return false;
+      }
 
-      currentSong.artist = artistName.substring(1, artistName.length() - 1);
-      currentSong.song = songName.substring(1, songName.length() - 1);
-      currentSong.Id = songId;
+      // DEVICE INFO
+      if (!doc["device"].isNull())
+      {
+        JsonObject device = doc["device"];
+        isActive = device["is_active"].as<bool>();
+        volCtrl = device["supports_volume"].as<bool>();
+        volume = device["volume_percent"].as<int>();
+
+        Serial.print("Spotify Status: ");
+        Serial.println(isActive);
+      }
+      else
+      {
+        Serial.println("Device info missing.");
+      }
+
+      // PROGRESS
+      if (doc["progress_ms"].is<int>())
+      {
+        currentSongPositionMs = doc["progress_ms"].as<int>(); // NOT float!
+      }
+      else
+      {
+        currentSongPositionMs = 0;
+      }
+
+      // SONG ITEM
+      if (!doc["item"].isNull())
+      {
+        JsonObject item = doc["item"];
+
+        // ARTIST NAME
+        if (!item["artists"].isNull())
+        {
+          JsonArray artists = item["artists"].as<JsonArray>();
+          if (!artists.isNull() && artists.size() > 0)
+          {
+            currentSong.artist = artists[0]["name"].as<String>();
+          }
+          else
+          {
+            currentSong.artist = "Unknown Artist";
+          }
+        }
+        else
+        {
+          currentSong.artist = "Unknown Artist";
+        }
+
+        // SONG NAME
+        currentSong.song = item["name"].as<String>();
+
+        // SONG DURATION
+        currentSong.durationMs = item["duration_ms"].as<int>();
+
+        // SONG ID
+        String songId = item["uri"].as<String>();
+        if (songId.startsWith("spotify:track:"))
+        {
+          songId = songId.substring(14); // Strip "spotify:track:"
+        }
+        currentSong.Id = songId;
+      }
+      else
+      {
+        // Default values if no item
+        currentSong.artist = "Unknown Artist";
+        currentSong.song = "No Song Playing";
+        currentSong.durationMs = 0;
+        currentSong.Id = "";
+      }
+
+      // PLAYBACK STATE
+      if (doc["is_playing"].is<bool>())
+      {
+        isPlaying = doc["is_playing"].as<bool>();
+      }
+      else
+      {
+        isPlaying = false;
+      }
+
+      lastSongPositionMs = currentSongPositionMs;
       success = true;
-    } else {
+
+      // Serial.println("Current song: " + currentSong.song);
+      // Serial.println("Current artist: " + currentSong.artist);
+    }
+    else if (httpResponseCode == 204)
+    {
+      // No content, no active device or no song playing
+      Serial.println("NOTE: No Active Device or No Song Playing.");
+      isActive = false;
+      volCtrl = false;
+      success = true;
+    }
+    else
+    {
       Serial.print("Error getting track info: ");
       Serial.println(httpResponseCode);
-      // String response = https.getString();
-      // Serial.println(response);
-      https.end();
     }
 
+    https.end();
 
-    // Disconnect from the Spotify API
-    if (success) {
+    if (success)
       drawScreen();
-      lastSongPositionMs = currentSongPositionMs;
-    }
+
     return success;
   }
 
-  //Display screen
-  bool drawScreen() {
-    display.clearDisplay();  // Clear previous display contents
+  bool drawScreen()
+  {
+    display.clearDisplay();
+
+    if (!isActive)
+    {
+      // Show the no active device screen
+      display.drawBitmap(9, 8, no_active_device, 112, 49, 1);
+      display.display();
+      return true;
+    }
+
+    // Display content for active device
     display.setTextColor(SH110X_WHITE);
     display.setTextSize(1);
 
-    // Ensure no string longer than 20 characters is printed
-    String songName = currentSong.song.length() > 20 ? currentSong.song.substring(0, 17) + "..." : currentSong.song;
-    String artistName = currentSong.artist.length() > 20 ? currentSong.artist.substring(0, 17) + "..." : currentSong.artist;
+    // Truncate long strings
+    String songName = truncateString(currentSong.song, 20);
+    String artistName = truncateString(currentSong.artist, 20);
 
-    // Display the song name
+    // Display song info
     display.setCursor(0, 0);
     display.print(songName);
 
-    // Display the artist name
     display.setCursor(0, 15);
     display.print(artistName);
 
-    int barY = 30;      // Set the Y-coordinate for the bar
-    int barHeight = 8;  // Set the height of the bar
-
-    // Calculate the width of the progress bar based on the current song position
+    // Draw progress bar
+    int barY = 30;
+    int barHeight = 8;
     int barWidth = map(currentSongPositionMs, 0, currentSong.durationMs, 0, SCREEN_WIDTH);
 
-    // Draw the background of the progress bar
     display.drawRect(0, barY, SCREEN_WIDTH, barHeight, SH110X_WHITE);
-
-    // Draw the filled portion of the progress bar
     display.fillRect(0, barY, barWidth, barHeight, SH110X_WHITE);
 
-    display.display();
-
     // Display play/pause state
-    if (isPlaying) {
-      display.setCursor(45, 55);
-      display.print("Playing");
-    } else {
-      display.setCursor(45, 55);
-      display.print("Paused");
-    }
+    display.setCursor(45, 55);
+    display.print(isPlaying ? "Playing" : "Paused");
 
     // Display volume
     display.setCursor(110, 55);
-    display.print(volume);
+    display.print(volCtrl ? String(volume) : "N/A");
 
     display.display();
-
-    Serial.println(currentSong.song);
     return true;
   }
 
+  bool togglePlay()
+  {
+    String url = "https://api.spotify.com/v1/me/player/";
+    url += isPlaying ? "pause" : "play";
 
-  bool togglePlay() {
-    String url = "https://api.spotify.com/v1/me/player/" + String(isPlaying ? "pause" : "play");
-    isPlaying = !isPlaying;
     https.begin(secureClient, url);
-    String auth = "Bearer " + String(accessToken);
-    https.addHeader("Authorization", auth);
-    https.addHeader("Content-Length", "0");  // Add Content-Length header
+    https.addHeader("Authorization", "Bearer " + accessToken);
+    https.addHeader("Content-Length", "0");
+
     int httpResponseCode = https.PUT("");
-    bool success = false;
-    // Check if the request was successful
-    if (httpResponseCode == 204) {
-      // String response = https.getString();
-      Serial.println((isPlaying ? "Paused" : "Playing"));
-      success = true;
-    } else {
-      Serial.print("Error pausing or playing: ");
+    bool success = (httpResponseCode == 204);
+
+    if (success)
+    {
+      isPlaying = !isPlaying;
+      Serial.println(isPlaying ? "Now playing" : "Now paused");
+    }
+    else
+    {
+      Serial.print("Error Toggling Playback: ");
       Serial.println(httpResponseCode);
-      String response = https.getString();
-      Serial.println(response);
+      Serial.println(https.getString());
     }
 
-    // Disconnect from the Spotify API
     https.end();
     getTrackInfo();
     return success;
   }
 
-  bool adjustVolume(int vol) {
-    // Ensure volume is within valid range (0-100)
-    if (vol < 0 || vol > 100) {
-      Serial.println("Volume must be between 0 and 100.");
-      return false;
-    }
+  bool adjustVolume(int vol)
+  {
+    // Ensure volume is within valid range
+    vol = constrain(vol, 0, 100);
 
     String url = "https://api.spotify.com/v1/me/player/volume?volume_percent=" + String(vol);
 
-    // Add authorization header
-    String auth = "Bearer " + String(accessToken);
-
-    // Begin the HTTP request
     https.begin(secureClient, url);
-    https.addHeader("Authorization", auth);
-    https.addHeader("Content-Length", "0");  // Add Content-Length header
+    https.addHeader("Authorization", "Bearer " + accessToken);
+    https.addHeader("Content-Length", "0");
 
-    // PUT request, no body needed
-    int httpResponseCode = https.PUT("");  // Empty body for the PUT request
+    int httpResponseCode = https.PUT("");
+    bool success = (httpResponseCode == 204);
 
-    bool success = false;
-    // Check if the request was successful
-    if (httpResponseCode == 204) {  // 204 No Content indicates success
+    if (success)
+    {
       currVol = vol;
-      Serial.println("Volume adjusted successfully.");
-      success = true;
-      drawScreen();
-    } else {
+      Serial.println("Volume set to: " + String(vol));
+    }
+    else
+    {
       Serial.print("Error setting volume: ");
       Serial.println(httpResponseCode);
-      String response = https.getString();
-      Serial.println(response);
-      success = false;
+      Serial.println(https.getString());
     }
 
-    // Disconnect from the Spotify API
     https.end();
+    getTrackInfo();
     return success;
   }
 
+  bool skipForward()
+  {
+    https.begin(secureClient, "https://api.spotify.com/v1/me/player/next");
+    https.addHeader("Authorization", "Bearer " + accessToken);
+    https.addHeader("Content-Length", "0");
 
-  bool skipForward() {
-    String url = "https://api.spotify.com/v1/me/player/next";
-    https.begin(secureClient, url);
-    String auth = "Bearer " + String(accessToken);
-    https.addHeader("Authorization", auth);
-    https.addHeader("Content-Length", "0");  // Add Content-Length header
     int httpResponseCode = https.POST("");
-    bool success = false;
-    // Check if the request was successful
-    if (httpResponseCode == 204) {
-      // String response = https.getString();
-      Serial.println("skipping forward");
-      success = true;
-    } else {
+    bool success = (httpResponseCode == 204);
+
+    if (success)
+    {
+      Serial.println("Skipped to next track");
+    }
+    else
+    {
       Serial.print("Error skipping forward: ");
       Serial.println(httpResponseCode);
-      String response = https.getString();
-      Serial.println(response);
+      Serial.println(https.getString());
     }
 
-
-    // Disconnect from the Spotify API
     https.end();
     getTrackInfo();
     return success;
   }
-  bool skipBack() {
-    String url = "https://api.spotify.com/v1/me/player/previous";
-    https.begin(secureClient, url);
-    String auth = "Bearer " + String(accessToken);
-    https.addHeader("Authorization", auth);
-    https.addHeader("Content-Length", "0");  // Add Content-Length header
+
+  bool skipBack()
+  {
+    https.begin(secureClient, "https://api.spotify.com/v1/me/player/previous");
+    https.addHeader("Authorization", "Bearer " + accessToken);
+    https.addHeader("Content-Length", "0");
+
     int httpResponseCode = https.POST("");
-    bool success = false;
-    // Check if the request was successful
-    if (httpResponseCode == 204) {
-      // String response = https.getString();
-      Serial.println("skipping backward");
-      success = true;
-    } else {
+    bool success = (httpResponseCode == 204);
+
+    if (success)
+    {
+      Serial.println("Skipped to previous track");
+    }
+    else
+    {
       Serial.print("Error skipping backward: ");
       Serial.println(httpResponseCode);
-      String response = https.getString();
-      Serial.println(response);
+      Serial.println(https.getString());
     }
 
-
-    // Disconnect from the Spotify API
     https.end();
     getTrackInfo();
     return success;
   }
+
+  // Public variables
   bool accessTokenSet = false;
-  long tokenStartTime;
+  unsigned long tokenStartTime;
   int tokenExpireTime;
-  songDetails currentSong;
+  SongDetails currentSong;
   float currentSongPositionMs;
   float lastSongPositionMs;
   int currVol;
+  bool isPlaying;
+  bool isActive = false;
+  bool volCtrl = false;
+  int volume;
+
 private:
-  WiFiClientSecure secureClient;
-  HTTPClient https;
   String accessToken;
   String refreshToken;
 };
 
-//Spotify Connection object
+// Global Spotify Connection instance
 SpotConn spotifyConnection;
 
-//Web server callbacks
-void handleRoot() {
-  Serial.println("handling root");
-  char page[500];
-  sprintf(page, mainPage, CLIENT_ID, REDIRECT_URI);
-  server.send(200, "text/html", String(page) + "\r\n");  //Send web page
+// Helper function to truncate strings
+String truncateString(const String &input, int maxLength)
+{
+  if (input.length() <= maxLength)
+    return input;
+  return input.substring(0, maxLength - 3) + "...";
 }
 
-void handleCallbackPage() {
-  if (!spotifyConnection.accessTokenSet) {
-    if (server.arg("code") == "") {  //Parameter not found
-      char page[500];
-      sprintf(page, errorPage, CLIENT_ID, REDIRECT_URI);
-      server.send(200, "text/html", String(page));  //Send web page
-    } else {                                        //Parameter found
-      if (spotifyConnection.getUserCode(server.arg("code"))) {
-        server.send(200, "text/html", "Spotify setup complete Auth refresh in :" + String(spotifyConnection.tokenExpireTime));
-      } else {
-        char page[500];
-        sprintf(page, errorPage, CLIENT_ID, REDIRECT_URI);
-        server.send(200, "text/html", String(page));  //Send web page
+// Web server handlers
+void handleRoot()
+{
+  Serial.println("Handling root request");
+
+  // Static buffer (safer than stack allocation)
+  static char page[800]; // Increased to 800 for safety
+
+  // Check if sprintf succeeds (prevents crashes)
+  if (snprintf(page, sizeof(page), mainPage, CLIENT_ID, REDIRECT_URI) < 0)
+  {
+    server.send(500, "text/plain", "Failed to generate page");
+    return;
+  }
+
+  server.send(200, "text/html", page); // Send directly (no String conversion)
+}
+
+void handleCallbackPage()
+{
+  if (!spotifyConnection.accessTokenSet)
+  {
+    if (server.arg("code") == "")
+    {
+      static char page[800];
+      if (snprintf(page, sizeof(page), errorPage, CLIENT_ID, REDIRECT_URI) < 0)
+      {
+        server.send(500, "text/plain", "Error page failed");
+        return;
+      }
+      server.send(200, "text/html", page);
+    }
+    else
+    {
+      if (spotifyConnection.getUserCode(server.arg("code")))
+      {
+        server.send(200, "text/plain",
+                    "Spotify setup complete. Refresh in: " + String(spotifyConnection.tokenExpireTime));
+      }
+      else
+      {
+        static char page[800];
+        if (snprintf(page, sizeof(page), errorPage, CLIENT_ID, REDIRECT_URI) < 0)
+        {
+          server.send(500, "text/plain", "Error page failed");
+          return;
+        }
+        server.send(200, "text/html", page);
       }
     }
-  } else {
-    server.send(200, "text/html", "Spotify setup complete");
+  }
+  else
+  {
+    server.send(200, "text/plain", "Already authenticated");
   }
 }
 
+// Button handler function
+void handleButtons()
+{
+  if (prevBtn.isPressed())
+  {
+    Serial.println("Previous button pressed");
+    spotifyConnection.skipBack();
+  }
 
-long timeLoop;
-long refreshLoop;
+  else if (playBtn.isPressed())
+  {
+    Serial.println("Play button pressed");
+    spotifyConnection.togglePlay();
+  }
+
+  else if (nextBtn.isPressed())
+  {
+    Serial.println("Next button pressed");
+    spotifyConnection.skipForward();
+  }
+
+  if (encSwBtn.isPressed())
+  {
+    Serial.println("Encoder switch pressed");
+    spotifyConnection.togglePlay();
+  }
+
+  prevBtn.loop();
+  playBtn.loop();
+  nextBtn.loop();
+  encSwBtn.loop();
+}
+
+// Volume control handler
+void handleVolumeControl()
+{
+  if (spotifyConnection.volCtrl)
+  {
+    int newVolume = encoder.getCount() * 5;
+    // Only update if volume change exceeds threshold
+    if (abs(newVolume - spotifyConnection.currVol) > VOLUME_UPDATE_THRESHOLD)
+    {
+      spotifyConnection.adjustVolume(newVolume);
+    }
+  }
+}
+
+// Global flag for server state
 bool serverOn = true;
 
-void setup() {
-  //Wait for OLED to turn on + Start OLED
-  delay(250);
-  display.begin(I2C_ADDRESS, true);
-  display.display();
-  //Show Splashscreen + Clear
-  delay(500);
-  display.clearDisplay();
-
-  //I CHANGED THIS
-  spotifyConnection.drawScreen();
-
+void setup()
+{
+  // Initialize serial communication
   Serial.begin(9600);
-  Serial.println("Welcome to Project Log!");
+  Serial.println("Starting ESP32 Spotify Player");
 
-  //Buttons PinMode
-  pinMode(play_btn_pin, INPUT_PULLUP);
-  pinMode(prev_btn_pin, INPUT_PULLUP);
-  pinMode(next_btn_pin, INPUT_PULLUP);
+  // Initialize display
+  delay(250); // Wait for OLED to initialize
+  display.begin(I2C_ADDRESS, true);
 
-  pinMode(enc_sw_pin, INPUT_PULLUP);
+  // Show splash screen
+  display.clearDisplay();
+  display.drawBitmap(9, 8, splash_screen, 112, 51, 1);
+  display.display();
+  delay(700);
 
-  encoder.attachHalfQuad(enc_dt_pin, enc_clk_pin);
-  encoder.setCount(10);
+  // Set up button pins
+  pinMode(PLAY_BTN_PIN, INPUT_PULLUP);
+  pinMode(PREV_BTN_PIN, INPUT_PULLUP);
+  pinMode(NEXT_BTN_PIN, INPUT_PULLUP);
+  pinMode(ENC_SW_PIN, INPUT_PULLUP);
 
+  // Set up rotary encoder
+  encoder.attachHalfQuad(ENC_DT_PIN, ENC_CLK_PIN);
+  encoder.setCount(10); // Initial value
+
+  // Connect to WiFi
   WiFi.begin(WIFI_SSID, PASSWORD);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(1000);
-    Serial.println("Connecting to WiFi...");
+  Serial.print("Connecting to WiFi");
+
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    delay(500);
+    Serial.print(".");
   }
-  Serial.println("Connected to WiFi\n Ip is: ");
+
+  Serial.println("\nConnected to WiFi");
+  Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 
+  // Set up web server
   server.on("/", handleRoot);
   server.on("/callback", handleCallbackPage);
   server.begin();
   Serial.println("HTTP server started");
+
+  // Show configuration screen
+  display.clearDisplay();
+  display.setTextColor(1);
+  display.setTextWrap(false);
+  display.setCursor(5, 38);
+  display.print("ESP IP:" + WiFi.localIP().toString());
+  display.drawBitmap(14, 15, configuring, 102, 15, 1);
+  display.display();
 }
 
-void loop() {
-  //server.handleClient();
-  if (spotifyConnection.accessTokenSet) {
-    if (serverOn) {
-      server.close();
-      serverOn = false;
-    }
-    if ((millis() - spotifyConnection.tokenStartTime) / 1000 > spotifyConnection.tokenExpireTime) {
-      Serial.println("refreshing token");
-      if (spotifyConnection.refreshAuth()) {
-        Serial.println("refreshed token");
-      }
-    }
-    if ((millis() - refreshLoop) > 5000) {
-      spotifyConnection.getTrackInfo();
+void loop()
+{
+  unsigned long currentMillis = millis();
 
-      //spotifyConnection.drawScreen();
-      refreshLoop = millis();
-    }
-
-    //Button Business
-    prev_btn_state = digitalRead(prev_btn_pin);
-    play_btn_state = digitalRead(play_btn_pin);
-    next_btn_state = digitalRead(next_btn_pin);
-
-    if (play_btn_prevstate == HIGH && play_btn_state == LOW) {
-      change_state();
-      delay(50);
-    } else if (prev_btn_prevstate == HIGH && prev_btn_state == LOW) {
-      prev_song();
-      delay(50);
-    } else if (next_btn_prevstate == HIGH && next_btn_state == LOW) {
-      next_song();
-      delay(50);
-    }
-
-    prev_btn_prevstate = prev_btn_state;
-    play_btn_prevstate = play_btn_state;
-    next_btn_prevstate = next_btn_state;
-
-    sw_btn_state = digitalRead(enc_sw_pin);
-    if (sw_btn_prevstate == HIGH && sw_btn_state == LOW) {
-      Serial.println("Encoder Btn Pressed");
-      delay(50);
-    }
-    sw_btn_prevstate = sw_btn_state;
-
-    volume = encoder.getCount() * 5;
-    if (abs(volume - spotifyConnection.currVol) > 2) {
-      spotifyConnection.adjustVolume(volume);
-    }
-    timeLoop = millis();
-  } else {
+  // If not authenticated, handle web server requests
+  if (!spotifyConnection.accessTokenSet)
+  {
     server.handleClient();
+    return;
   }
-  // Serial.println(millis() - timeLoop);
-  // timeLoop = millis();
-}
 
+  // Close server after authentication
+  if (serverOn)
+  {
+    server.close();
+    serverOn = false;
+  }
 
-void change_state() {
-  Serial.println("Button PRESSED");
-  //SPOTIFY REQUEST
-  spotifyConnection.togglePlay();
-}
+  // Refresh access token if needed
+  if ((currentMillis - spotifyConnection.tokenStartTime) / 1000 > spotifyConnection.tokenExpireTime - 60)
+  {
+    Serial.println("Refreshing token");
+    if (spotifyConnection.refreshAuth())
+    {
+      Serial.println("Token refreshed successfully");
+    }
+  }
 
-void prev_song() {
-  Serial.println("Previous Song");
-  //SPOTIFY REQUEST
-  spotifyConnection.skipBack();
-}
+  // Update track info periodically
+  if (currentMillis - lastApiRefresh > API_REFRESH_INTERVAL)
+  {
+    spotifyConnection.getTrackInfo();
+    lastApiRefresh = currentMillis;
+  }
 
-void next_song() {
-  Serial.println("Next Song");
-  //SPOTIFY REQUEST
-  spotifyConnection.skipForward();
+  // Handle user input
+  handleButtons();
+
+  // Handle volume control
+  handleVolumeControl();
 }
