@@ -1,4 +1,4 @@
-/*ESP Spotify Player V1
+/*ESP Spotify Player V2
 - By Kaustubh Doval
 
 OLED: 128x64
@@ -46,9 +46,9 @@ SETUP:
 #define PASSWORD "WIFI_PASSWORD"
 
 // Spotify API credentials
-#define CLIENT_ID "SPOTIFY_CLIENT_ID"
-#define CLIENT_SECRET "SPOTIFY_CLIENT_SECRET"
-#define REDIRECT_URI "http://YOUR_ESP_IP/callback"
+#define CLIENT_ID "CLIENT_ID"
+#define CLIENT_SECRET "CLIENT_SECRET"
+#define REDIRECT_URI "http://ESP_IP/callback"
 
 // Pin Definitions
 #define PREV_BTN_PIN 5
@@ -119,6 +119,7 @@ public:
   {
     secureClient.setInsecure();
     secureClient.setTimeout(10000); // 10 second timeout
+    secureClient.setHandshakeTimeout(10000);
   }
 
   bool getUserCode(const String &serverCode)
@@ -333,6 +334,21 @@ public:
 
       // Serial.println("Current song: " + currentSong.song);
       // Serial.println("Current artist: " + currentSong.artist);
+
+      // Update Volume
+      if (!doc["device"].isNull())
+      {
+        JsonObject device = doc["device"];
+        isActive = device["is_active"].as<bool>();
+        volCtrl = device["supports_volume"].as<bool>();
+        volume = device["volume_percent"].as<int>();
+
+        // Set encoder count to match current volume
+        encoder.setCount(volume / 5); // Convert volume to encoder counts
+
+        Serial.print("Spotify Status: ");
+        Serial.println(isActive);
+      }
     }
     else if (httpResponseCode == 204)
     {
@@ -673,7 +689,6 @@ void setup()
 
   // Set up rotary encoder
   encoder.attachHalfQuad(ENC_DT_PIN, ENC_CLK_PIN);
-  encoder.setCount(10); // Initial value
 
   // Connect to WiFi
   WiFi.begin(WIFI_SSID, PASSWORD);
