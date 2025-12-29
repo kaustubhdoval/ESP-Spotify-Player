@@ -36,6 +36,14 @@ SpotConn spotifyConnection;
 SSLCert *cert;
 HTTPSServer *secureServer;
 
+static void (*externalDrawScreen)() = nullptr;
+
+// Add a public function to set it
+void setDrawScreenCallback(void (*callback)())
+{
+    externalDrawScreen = callback;
+}
+
 // SpotConn constructor
 SpotConn::SpotConn() : accessTokenSet(false),
                        tokenStartTime(0),
@@ -265,7 +273,7 @@ bool SpotConn::getTrackInfo()
         isActive = false;
         volCtrl = false;
         success = true;
-        drawScreen();
+        externalDrawScreen();
         return true;
     }
 
@@ -352,7 +360,7 @@ bool SpotConn::getTrackInfo()
 
     if (success)
     {
-        drawScreen();
+        externalDrawScreen();
     }
 
     return success;
@@ -491,6 +499,11 @@ bool SpotConn::skipBack()
 bool SpotConn::getStatus()
 {
     return isPlaying;
+}
+
+bool SpotConn::getActiveStatus()
+{
+    return isActive;
 }
 
 float SpotConn::getCurrentPositionMs()

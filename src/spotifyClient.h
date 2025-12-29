@@ -31,6 +31,7 @@ using namespace httpsserver;
 void handle404(HTTPRequest *req, HTTPResponse *res);
 void handleRoot(HTTPRequest *req, HTTPResponse *res);
 void handleCallbackPage(HTTPRequest *req, HTTPResponse *res);
+void setDrawScreenCallback(void (*callback)());
 
 // Spotify Root CA Certificate (extern declaration)
 extern const char *spotify_root_ca;
@@ -74,6 +75,7 @@ public:
 
     // Status getters
     bool getStatus();
+    bool getActiveStatus();
     float getCurrentPositionMs();
     int getCurrentVolume();
     SongDetails getCurrentSong();
