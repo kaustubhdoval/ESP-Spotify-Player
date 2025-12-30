@@ -35,6 +35,7 @@ You need to have an **application on the Spotify API Dashboard**. Make sure that
 2. Change the placeholder values in 'secrets.h' to your values
 3. Run the program, You can see your ESPs IP on Serial Monitor (9600 Baud Rate) and on the OLED.
    You need to add the IP address of your ESP to REDIRECT_URI definition in 'secrets.h': https://YOUR_ESP_IP/callback
+4. Upload this new code to the ESP32
 
 There are also some changes you need to make to the **esp32_https_server** library code to enable larger header size. Open the `HTTPSServerConstants.hpp` file Change the following values:
 
@@ -44,13 +45,15 @@ There are also some changes you need to make to the **esp32_https_server** libra
 #define HTTPS_MAX_HEADER_LENGTH 4096
 ```
 
-Also remember to add this Redirect URI to the Spotify App as well. After that is done, upload the updated code to the ESP and you are good to go!
+<br/> <br/>
 
-<br />
+#### Quick Checks <br/>
 
-> Make sure the index.h, secrets.h and .ino files are in the same directory when uploading the code.
+> - Add the Redirect URI to the Spotify Web API via the Dashboard.
+> - Make sure the main.cpp, spotifyClient.h, spotifyClient.cpp, index.h and secrets.h files are in the same directory when uploading the code.
+> - Change constants in the _esp32_https_server_ library
 
-<br />
+<br/>
 
 ## Wiring
 
