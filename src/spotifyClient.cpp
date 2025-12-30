@@ -301,6 +301,11 @@ bool SpotConn::togglePlay()
     String path = "/v1/me/player/";
     path += isPlaying ? "pause" : "play";
 
+    // Update Screen BEFORE sending request
+    bool oldState = isPlaying;
+    isPlaying = !isPlaying;
+    externalDrawScreen(); // Show change immediately
+
     String headers =
         "Authorization: Bearer " + accessToken + "\r\n"
                                                  "Content-Type: application/json\r\n"
@@ -324,9 +329,9 @@ bool SpotConn::togglePlay()
     else
     {
         Serial.println("Error toggling playback");
+        isPlaying = oldState;
     }
 
-    getTrackInfo();
     return ok;
 }
 
@@ -386,13 +391,13 @@ bool SpotConn::skipForward()
     if (ok)
     {
         Serial.println("Skipped to next track");
+        getTrackInfo();
     }
     else
     {
         Serial.println("Error skipping forward");
     }
 
-    getTrackInfo();
     return ok;
 }
 
@@ -416,13 +421,13 @@ bool SpotConn::skipBack()
     if (ok)
     {
         Serial.println("Skipped to previous track");
+        getTrackInfo();
     }
     else
     {
         Serial.println("Error skipping backward");
     }
 
-    getTrackInfo();
     return ok;
 }
 

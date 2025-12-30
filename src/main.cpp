@@ -7,10 +7,6 @@
 #include <ESP32Encoder.h>
 #include <ezButton.h>
 
-// Load Env Variables
-#include "secrets.h"
-
-// Load other Files
 #include "spotifyClient.h"
 
 // Pin Definitions
@@ -296,7 +292,8 @@ void loop()
   handleVolumeControl();
 
   // Update track info periodically
-  if (currentMillis - lastApiRefresh > API_REFRESH_INTERVAL)
+  unsigned long pollInterval = spotifyConnection.isPlaying ? API_REFRESH_INTERVAL : 30000; // 30s when paused
+  if (currentMillis - lastApiRefresh > pollInterval)
   {
     spotifyConnection.getTrackInfo();
     lastApiRefresh = currentMillis;
