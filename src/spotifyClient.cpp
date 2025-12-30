@@ -63,146 +63,6 @@ SpotConn::SpotConn() : accessTokenSet(false),
     secureClient.setHandshakeTimeout(10000);
 }
 
-// HTTPS Request Helper Function
-bool httpsRequest(
-    const char *host,
-    const char *path,
-    const String &method,
-    const String &headers,
-    const String &body,
-    String &responseBody)
-{
-    // Use the persistent connection from spotifyConnection
-    if (!spotifyConnection.ensureConnection(host))
-    {
-        Serial.println("Failed to ensure connection");
-        return false;
-    }
-
-    WiFiClientSecure &client = spotifyConnection.secureClient;
-
-    // ---- Request line ----
-    client.print(method + " " + path + " HTTP/1.1\r\n");
-    client.print("Host: " + String(host) + "\r\n");
-    client.print("User-Agent: ESP32\r\n");
-    client.print("Connection: keep-alive\r\n"); // Changed from "close"
-
-    // ---- Custom headers ----
-    client.print(headers);
-
-    // ---- Content-Length if body exists ----
-    if (body.length() > 0)
-    {
-        client.print("Content-Length: ");
-        client.print(body.length());
-        client.print("\r\n");
-    }
-
-    client.print("\r\n");
-
-    // ---- Body ----
-    if (body.length() > 0)
-    {
-        client.print(body);
-    }
-
-    // ---- Read status line ----
-    unsigned long timeout = millis();
-    while (client.available() == 0)
-    {
-        if (millis() - timeout > 10000)
-        {
-            Serial.println("Request timeout");
-            spotifyConnection.closeConnection(); // Force reconnect on timeout
-            return false;
-        }
-        delay(10);
-    }
-
-    // Read and parse status line
-    String statusLine = client.readStringUntil('\n');
-
-    // ---- Read headers ----
-    int contentLength = -1;
-    bool chunked = false;
-
-    while (client.connected() || client.available())
-    {
-        String line = client.readStringUntil('\n');
-        if (line == "\r")
-            break;
-
-        // Parse Content-Length
-        if (line.startsWith("Content-Length:"))
-        {
-            contentLength = line.substring(15).toInt();
-        }
-        // Check for chunked encoding
-        if (line.indexOf("Transfer-Encoding: chunked") >= 0)
-        {
-            chunked = true;
-        }
-    }
-
-    // ---- Read body ----
-    responseBody = "";
-
-    if (contentLength == 0)
-    {
-        // No body (e.g., 204 response)
-        return true;
-    }
-    else if (contentLength > 0)
-    {
-        // Read exact content length
-        int totalRead = 0;
-        while (totalRead < contentLength && client.connected())
-        {
-            if (client.available())
-            {
-                char c = client.read();
-                responseBody += c;
-                totalRead++;
-            }
-        }
-    }
-    else if (chunked)
-    {
-        // Handle chunked encoding
-        while (client.connected() || client.available())
-        {
-            String chunkSizeLine = client.readStringUntil('\n');
-            int chunkSize = strtol(chunkSizeLine.c_str(), NULL, 16);
-
-            if (chunkSize == 0)
-                break; // Last chunk
-
-            for (int i = 0; i < chunkSize && client.available(); i++)
-            {
-                responseBody += (char)client.read();
-            }
-            client.readStringUntil('\n');
-        }
-    }
-    else
-    {
-        // No Content-Length header, read until connection closes or timeout
-        timeout = millis();
-        while (client.connected() || client.available())
-        {
-            if (client.available())
-            {
-                responseBody += client.readString();
-                timeout = millis();
-            }
-            if (millis() - timeout > 2000)
-                break; // 2 second timeout for remaining data
-        }
-    }
-
-    return true;
-}
-
 // SpotConn method implementations
 bool SpotConn::getUserCode(const String &serverCode)
 {
@@ -702,4 +562,144 @@ void SpotConn::closeConnection()
         Serial.println("Connection closed");
     }
     requestCount = 0;
+}
+
+// HTTPS Request Helper Function
+bool httpsRequest(
+    const char *host,
+    const char *path,
+    const String &method,
+    const String &headers,
+    const String &body,
+    String &responseBody)
+{
+    // Use the persistent connection from spotifyConnection
+    if (!spotifyConnection.ensureConnection(host))
+    {
+        Serial.println("Failed to ensure connection");
+        return false;
+    }
+
+    WiFiClientSecure &client = spotifyConnection.secureClient;
+
+    // ---- Request line ----
+    client.print(method + " " + path + " HTTP/1.1\r\n");
+    client.print("Host: " + String(host) + "\r\n");
+    client.print("User-Agent: ESP32\r\n");
+    client.print("Connection: keep-alive\r\n"); // Changed from "close"
+
+    // ---- Custom headers ----
+    client.print(headers);
+
+    // ---- Content-Length if body exists ----
+    if (body.length() > 0)
+    {
+        client.print("Content-Length: ");
+        client.print(body.length());
+        client.print("\r\n");
+    }
+
+    client.print("\r\n");
+
+    // ---- Body ----
+    if (body.length() > 0)
+    {
+        client.print(body);
+    }
+
+    // ---- Read status line ----
+    unsigned long timeout = millis();
+    while (client.available() == 0)
+    {
+        if (millis() - timeout > 10000)
+        {
+            Serial.println("Request timeout");
+            spotifyConnection.closeConnection(); // Force reconnect on timeout
+            return false;
+        }
+        delay(10);
+    }
+
+    // Read and parse status line
+    String statusLine = client.readStringUntil('\n');
+
+    // ---- Read headers ----
+    int contentLength = -1;
+    bool chunked = false;
+
+    while (client.connected() || client.available())
+    {
+        String line = client.readStringUntil('\n');
+        if (line == "\r")
+            break;
+
+        // Parse Content-Length
+        if (line.startsWith("Content-Length:"))
+        {
+            contentLength = line.substring(15).toInt();
+        }
+        // Check for chunked encoding
+        if (line.indexOf("Transfer-Encoding: chunked") >= 0)
+        {
+            chunked = true;
+        }
+    }
+
+    // ---- Read body ----
+    responseBody = "";
+
+    if (contentLength == 0)
+    {
+        // No body (e.g., 204 response)
+        return true;
+    }
+    else if (contentLength > 0)
+    {
+        // Read exact content length
+        int totalRead = 0;
+        while (totalRead < contentLength && client.connected())
+        {
+            if (client.available())
+            {
+                char c = client.read();
+                responseBody += c;
+                totalRead++;
+            }
+        }
+    }
+    else if (chunked)
+    {
+        // Handle chunked encoding
+        while (client.connected() || client.available())
+        {
+            String chunkSizeLine = client.readStringUntil('\n');
+            int chunkSize = strtol(chunkSizeLine.c_str(), NULL, 16);
+
+            if (chunkSize == 0)
+                break; // Last chunk
+
+            for (int i = 0; i < chunkSize && client.available(); i++)
+            {
+                responseBody += (char)client.read();
+            }
+            client.readStringUntil('\n');
+        }
+    }
+    else
+    {
+        // No Content-Length header, read until connection closes or timeout
+        timeout = millis();
+        while (client.connected() || client.available())
+        {
+            if (client.available())
+            {
+                responseBody += client.readString();
+                timeout = millis();
+            }
+            if (millis() - timeout > 2000)
+                break; // 2 second timeout for remaining data
+        }
+    }
+
+    return true;
 }

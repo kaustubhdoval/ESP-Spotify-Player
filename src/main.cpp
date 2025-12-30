@@ -39,6 +39,21 @@ ezButton encSwBtn(ENC_SW_PIN);
 // Timing variables
 unsigned long lastApiRefresh = 0;
 
+// Interrupt flags
+volatile bool buttonPressed = false;
+volatile bool encoderPressed = false;
+
+// ISR handlers
+void IRAM_ATTR buttonISR()
+{
+  buttonPressed = true;
+}
+
+void IRAM_ATTR encoderSwitchISR()
+{
+  encoderPressed = true;
+}
+
 // Forward declarations
 String truncateString(const String &input, int maxLength);
 void handleButtons();
@@ -106,31 +121,59 @@ String truncateString(const String &input, int maxLength)
 // Button handler function
 void handleButtons()
 {
+  // Only process if interrupt flag is set
+  if (!buttonPressed && !encoderPressed)
+  {
+    return;
+  }
+
+  // Add debounce delay
+  static unsigned long lastButtonTime = 0;
+  unsigned long currentTime = millis();
+
+  if (currentTime - lastButtonTime < 150)
+  {
+    buttonPressed = false;
+    encoderPressed = false;
+    return;
+  }
+
+  bool actionTaken = false;
+
   if (prevBtn.isPressed())
   {
     Serial.println("Previous button pressed");
     spotifyConnection.skipBack();
-    spotifyConnection.getTrackInfo();
+    actionTaken = true;
   }
-
   else if (playBtn.isPressed())
   {
     Serial.println("Play button pressed");
     spotifyConnection.togglePlay();
+    actionTaken = true;
   }
-
   else if (nextBtn.isPressed())
   {
     Serial.println("Next button pressed");
     spotifyConnection.skipForward();
-    spotifyConnection.getTrackInfo();
+    actionTaken = true;
   }
-
-  if (encSwBtn.isPressed())
+  else if (encSwBtn.isPressed())
   {
     Serial.println("Encoder switch pressed");
     spotifyConnection.togglePlay();
+    actionTaken = true;
   }
+
+  if (actionTaken)
+  {
+    spotifyConnection.getTrackInfo();
+    lastButtonTime = currentTime;
+  }
+
+  // Reset flags
+  buttonPressed = false;
+  encoderPressed = false;
 
   prevBtn.loop();
   playBtn.loop();
@@ -141,14 +184,36 @@ void handleButtons()
 // Volume control handler
 void handleVolumeControl()
 {
-  if (spotifyConnection.volCtrl)
+  if (!spotifyConnection.volCtrl)
   {
-    int newVolume = encoder.getCount() * 5;
-    // Only update if volume change exceeds threshold
-    if (abs(newVolume - spotifyConnection.currVol) > VOLUME_UPDATE_THRESHOLD)
-    {
-      spotifyConnection.adjustVolume(newVolume);
-    }
+    return;
+  }
+
+  static int lastEncoderCount = 0;
+  static unsigned long lastVolumeChange = 0;
+  static bool volumeChangePending = false;
+
+  int currentCount = encoder.getCount();
+
+  // Detect encoder movement
+  if (currentCount != lastEncoderCount)
+  {
+    lastEncoderCount = currentCount;
+    lastVolumeChange = millis();
+    volumeChangePending = true;
+
+    // Update display immediately with new volume (optimistic update)
+    int newVolume = constrain(currentCount * 5, 0, 100);
+    spotifyConnection.currVol = newVolume;
+    drawScreen(); // Show new volume immediately
+  }
+
+  // Send API request after encoder stops moving for 500ms
+  if (volumeChangePending && (millis() - lastVolumeChange > 500))
+  {
+    int newVolume = currentCount * 5;
+    spotifyConnection.adjustVolume(newVolume);
+    volumeChangePending = false;
   }
 }
 
@@ -176,6 +241,10 @@ void setup()
   pinMode(PREV_BTN_PIN, INPUT_PULLUP);
   pinMode(NEXT_BTN_PIN, INPUT_PULLUP);
   pinMode(ENC_SW_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(PLAY_BTN_PIN), buttonISR, FALLING);
+  attachInterrupt(digitalPinToInterrupt(PREV_BTN_PIN), buttonISR, FALLING);
+  attachInterrupt(digitalPinToInterrupt(NEXT_BTN_PIN), buttonISR, FALLING);
+  attachInterrupt(digitalPinToInterrupt(ENC_SW_PIN), encoderSwitchISR, FALLING);
 
   // Set up rotary encoder
   encoder.attachHalfQuad(ENC_DT_PIN, ENC_CLK_PIN);
@@ -222,18 +291,16 @@ void loop()
     }
   }
 
+  // Handle user inputs
+  handleButtons();
+  handleVolumeControl();
+
   // Update track info periodically
   if (currentMillis - lastApiRefresh > API_REFRESH_INTERVAL)
   {
     spotifyConnection.getTrackInfo();
     lastApiRefresh = currentMillis;
   }
-
-  // Handle user input
-  handleButtons();
-
-  // Handle volume control
-  handleVolumeControl();
 }
 
 // Web server handlers
@@ -285,7 +352,7 @@ void handleCallbackPage(HTTPRequest *req, HTTPResponse *res)
       res->println(page);
     }
     else
-    { // Convert std::string to String
+    {
       String codeStr = String(code.c_str());
       if (spotifyConnection.getUserCode(codeStr))
       {
