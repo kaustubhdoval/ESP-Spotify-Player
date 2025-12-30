@@ -54,9 +54,13 @@ SpotConn::SpotConn() : accessTokenSet(false),
                        isPlaying(false),
                        isActive(false),
                        volCtrl(false),
-                       volume(0)
+                       volume(0),
+                       lastConnectionTime(0),
+                       requestCount(0)
 {
-    // Constructor body
+    secureClient.setCACert(spotify_root_ca);
+    secureClient.setTimeout(10000);
+    secureClient.setHandshakeTimeout(10000);
 }
 
 // HTTPS Request Helper Function
@@ -68,68 +72,134 @@ bool httpsRequest(
     const String &body,
     String &responseBody)
 {
-
-    WiFiClientSecure secureClient;
-
-    // Force close any existing connection
-    if (secureClient.connected())
+    // Use the persistent connection from spotifyConnection
+    if (!spotifyConnection.ensureConnection(host))
     {
-        secureClient.stop();
-        delay(100);
-    }
-
-    secureClient.setCACert(spotify_root_ca);
-    secureClient.setTimeout(10000); // 10 second timeout
-    secureClient.setHandshakeTimeout(10000);
-
-    if (!secureClient.connect(host, 443))
-    {
-        Serial.println("HTTPS connection failed");
+        Serial.println("Failed to ensure connection");
         return false;
     }
 
+    WiFiClientSecure &client = spotifyConnection.secureClient;
+
     // ---- Request line ----
-    secureClient.print(method + " " + path + " HTTP/1.1\r\n");
-    secureClient.print("Host: " + String(host) + "\r\n");
-    secureClient.print("User-Agent: ESP32\r\n");
-    secureClient.print("Connection: close\r\n");
+    client.print(method + " " + path + " HTTP/1.1\r\n");
+    client.print("Host: " + String(host) + "\r\n");
+    client.print("User-Agent: ESP32\r\n");
+    client.print("Connection: keep-alive\r\n"); // Changed from "close"
 
     // ---- Custom headers ----
-    secureClient.print(headers);
+    client.print(headers);
 
     // ---- Content-Length if body exists ----
     if (body.length() > 0)
     {
-        secureClient.print("Content-Length: ");
-        secureClient.print(body.length());
-        secureClient.print("\r\n");
+        client.print("Content-Length: ");
+        client.print(body.length());
+        client.print("\r\n");
     }
 
-    secureClient.print("\r\n");
+    client.print("\r\n");
 
     // ---- Body ----
     if (body.length() > 0)
     {
-        secureClient.print(body);
+        client.print(body);
     }
 
-    // ---- Read headers ----
-    while (secureClient.connected())
+    // ---- Read status line ----
+    unsigned long timeout = millis();
+    while (client.available() == 0)
     {
-        String line = secureClient.readStringUntil('\n');
+        if (millis() - timeout > 10000)
+        {
+            Serial.println("Request timeout");
+            spotifyConnection.closeConnection(); // Force reconnect on timeout
+            return false;
+        }
+        delay(10);
+    }
+
+    // Read and parse status line
+    String statusLine = client.readStringUntil('\n');
+
+    // ---- Read headers ----
+    int contentLength = -1;
+    bool chunked = false;
+
+    while (client.connected() || client.available())
+    {
+        String line = client.readStringUntil('\n');
         if (line == "\r")
             break;
+
+        // Parse Content-Length
+        if (line.startsWith("Content-Length:"))
+        {
+            contentLength = line.substring(15).toInt();
+        }
+        // Check for chunked encoding
+        if (line.indexOf("Transfer-Encoding: chunked") >= 0)
+        {
+            chunked = true;
+        }
     }
 
     // ---- Read body ----
     responseBody = "";
-    while (secureClient.available())
+
+    if (contentLength == 0)
     {
-        responseBody += secureClient.readString();
+        // No body (e.g., 204 response)
+        return true;
+    }
+    else if (contentLength > 0)
+    {
+        // Read exact content length
+        int totalRead = 0;
+        while (totalRead < contentLength && client.connected())
+        {
+            if (client.available())
+            {
+                char c = client.read();
+                responseBody += c;
+                totalRead++;
+            }
+        }
+    }
+    else if (chunked)
+    {
+        // Handle chunked encoding
+        while (client.connected() || client.available())
+        {
+            String chunkSizeLine = client.readStringUntil('\n');
+            int chunkSize = strtol(chunkSizeLine.c_str(), NULL, 16);
+
+            if (chunkSize == 0)
+                break; // Last chunk
+
+            for (int i = 0; i < chunkSize && client.available(); i++)
+            {
+                responseBody += (char)client.read();
+            }
+            client.readStringUntil('\n');
+        }
+    }
+    else
+    {
+        // No Content-Length header, read until connection closes or timeout
+        timeout = millis();
+        while (client.connected() || client.available())
+        {
+            if (client.available())
+            {
+                responseBody += client.readString();
+                timeout = millis();
+            }
+            if (millis() - timeout > 2000)
+                break; // 2 second timeout for remaining data
+        }
     }
 
-    secureClient.stop();
-    delay(100);
     return true;
 }
 
@@ -579,4 +649,57 @@ void SpotConn::initialize()
         Serial.print("Access via: https://");
         Serial.println(WiFi.localIP());
     }
+}
+
+bool SpotConn::ensureConnection(const char *host)
+{
+    unsigned long currentTime = millis();
+
+    // Check if connection is stale or needs refresh
+    bool needsReconnect = false;
+
+    if (!secureClient.connected())
+    {
+        Serial.println("Connection lost, reconnecting...");
+        needsReconnect = true;
+    }
+    else if (currentTime - lastConnectionTime > CONNECTION_TIMEOUT)
+    {
+        Serial.println("Connection idle too long, reconnecting...");
+        needsReconnect = true;
+    }
+    else if (requestCount >= MAX_REQUESTS_PER_CONNECTION)
+    {
+        Serial.println("Max requests reached, reconnecting...");
+        needsReconnect = true;
+    }
+
+    if (needsReconnect)
+    {
+        secureClient.stop();
+        delay(100);
+
+        if (!secureClient.connect(host, 443))
+        {
+            Serial.println("Connection failed");
+            return false;
+        }
+
+        Serial.println("Connected to " + String(host));
+        requestCount = 0;
+    }
+
+    lastConnectionTime = currentTime;
+    requestCount++;
+    return true;
+}
+
+void SpotConn::closeConnection()
+{
+    if (secureClient.connected())
+    {
+        secureClient.stop();
+        Serial.println("Connection closed");
+    }
+    requestCount = 0;
 }

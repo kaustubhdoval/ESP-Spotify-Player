@@ -61,6 +61,7 @@ class SpotConn
 {
 public:
     SpotConn();
+    WiFiClientSecure secureClient;
 
     // Authentication methods
     bool getUserCode(const String &serverCode);
@@ -83,6 +84,10 @@ public:
     // Initialization
     void initialize();
 
+    // WifiClient Secure Methods
+    bool ensureConnection(const char *host);
+    void closeConnection();
+
     // Public member variables
     bool accessTokenSet;
     unsigned long tokenStartTime;
@@ -95,6 +100,10 @@ public:
     bool isActive;
     bool volCtrl;
     int volume;
+    unsigned long lastConnectionTime;
+    unsigned int requestCount;
+    static const unsigned long CONNECTION_TIMEOUT = 60000;      // 60 seconds idle timeout
+    static const unsigned int MAX_REQUESTS_PER_CONNECTION = 50; // Reconnect after N requests
 
 private:
     String accessToken;
