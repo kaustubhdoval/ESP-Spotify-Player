@@ -33,7 +33,7 @@ You need to have an **application on the Spotify API Dashboard**. Make sure that
 
 1. Rename the 'secrets_EXAMPLE.h' file to 'secrets.h'
 2. Change the placeholder values in 'secrets.h' to your values
-3. Run the program, You can see your ESPs IP on Serial Monitor (9600 Baud Rate) and on the OLED.
+3. Run the program, You can see your ESPs IP on Serial Monitor (115200 Baud Rate) and on the OLED.
    You need to add the IP address of your ESP to REDIRECT_URI definition in 'secrets.h': https://YOUR_ESP_IP/callback
 4. Upload this new code to the ESP32
 
