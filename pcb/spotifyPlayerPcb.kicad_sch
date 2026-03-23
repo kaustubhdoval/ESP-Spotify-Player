@@ -5168,6 +5168,16 @@
 	)
 	(wire
 		(pts
+			(xy 191.77 153.67) (xy 195.58 153.67)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "5dfd1da9-e27d-4f52-8fad-6fe712f09aa0")
+	)
+	(wire
+		(pts
 			(xy 208.28 63.5) (xy 224.79 63.5)
 		)
 		(stroke
@@ -5195,6 +5205,16 @@
 			(type default)
 		)
 		(uuid "662596a8-44d5-4cb8-8f99-0197204ec2d9")
+	)
+	(wire
+		(pts
+			(xy 191.77 151.13) (xy 191.77 153.67)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "67477c09-c3ed-4381-94e6-81f6bff51e8e")
 	)
 	(wire
 		(pts
@@ -8476,6 +8496,72 @@
 	)
 	(symbol
 		(lib_id "power:+3V3")
+		(at 191.77 151.13 0)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "7593d28e-f8e8-4962-ac13-47454ddf95b3")
+		(property "Reference" "#PWR036"
+			(at 191.77 154.94 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Value" "+5V"
+			(at 191.77 146.05 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 191.77 151.13 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" ""
+			(at 191.77 151.13 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "Power symbol creates a global label with name \"+3V3\""
+			(at 191.77 151.13 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "35ea4ef6-6633-4558-b1e5-9eb338fec3d0")
+		)
+		(instances
+			(project "spotifyPlayerPcb"
+				(path "/0ef4280d-59b9-4ff0-88ee-7f24dc2897de"
+					(reference "#PWR036")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "power:+3V3")
 		(at 203.2 88.9 0)
 		(unit 1)
 		(exclude_from_sim no)
@@ -9569,6 +9655,73 @@
 			(project "spotifyPlayerPcb"
 				(path "/0ef4280d-59b9-4ff0-88ee-7f24dc2897de"
 					(reference "#PWR022")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Connector:TestPoint")
+		(at 195.58 153.67 0)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "87b6522c-0281-48a7-9fec-b3e969c2daf4")
+		(property "Reference" "TP4"
+			(at 198.12 149.0979 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "TestPoint"
+			(at 198.12 151.6379 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" "TestPoint:TestPoint_Pad_D1.5mm"
+			(at 200.66 153.67 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" "~"
+			(at 200.66 153.67 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "test point"
+			(at 195.58 153.67 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "f1a3e925-5363-48b7-b7b1-7bd72105ef58")
+		)
+		(instances
+			(project "spotifyPlayerPcb"
+				(path "/0ef4280d-59b9-4ff0-88ee-7f24dc2897de"
+					(reference "TP4")
 					(unit 1)
 				)
 			)
