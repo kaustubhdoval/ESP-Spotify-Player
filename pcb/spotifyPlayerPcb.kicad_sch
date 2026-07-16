@@ -4608,6 +4608,16 @@
 			(embedded_fonts no)
 		)
 	)
+	(text "Spotify Player PCB\n"
+		(exclude_from_sim no)
+		(at 200.406 189.738 0)
+		(effects
+			(font
+				(size 1.778 1.778)
+			)
+		)
+		(uuid "0868b208-e77a-468c-94d5-2b3df9f2855f")
+	)
 	(text "UART"
 		(exclude_from_sim no)
 		(at 264.922 110.236 0)
@@ -4697,6 +4707,16 @@
 			)
 		)
 		(uuid "a5d216a3-6d83-4155-be6c-2c08ae6b582e")
+	)
+	(text "1.3"
+		(exclude_from_sim no)
+		(at 271.78 193.294 0)
+		(effects
+			(font
+				(size 1.524 1.524)
+			)
+		)
+		(uuid "faee24c0-cc30-400c-ac82-22ff7204fdf0")
 	)
 	(junction
 		(at 165.1 58.42)
