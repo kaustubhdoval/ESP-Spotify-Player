@@ -14,7 +14,6 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <base64.h>
-#include <ESP32Encoder.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPSServer.hpp>

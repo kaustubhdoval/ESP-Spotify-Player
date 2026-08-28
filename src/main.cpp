@@ -4,8 +4,9 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SH110X.h>
-#include <ESP32Encoder.h>
 #include <ezButton.h>
+
+#include "SoftHalfQuadEncoder.h"
 
 #include "spotifyClient.h"
 
@@ -25,7 +26,7 @@
 
 // Objects
 Adafruit_SH1106G display = Adafruit_SH1106G(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-ESP32Encoder encoder;
+SoftHalfQuadEncoder encoder;
 
 ezButton prevBtn(PREV_BTN_PIN);
 ezButton playBtn(PLAY_BTN_PIN);

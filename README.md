@@ -75,14 +75,30 @@ DT -> D2 <br />
 SW -> D15
 <br /><br />
 
+## Using a Classic ESP32 Devkit
+
+This project now targets **ESP32-C3** by default, since the ESP32-C3 has no PCNT peripheral and the `esp32_https_server` library relied on classic-ESP32-only hardware SHA — both were replaced with portable equivalents (a software quadrature decoder and `mbedtls_sha1`) that work on any ESP32 variant. If you're on an original ESP32 devkit, no code changes are needed — just repoint the board in `platformio.ini`:
+
+```ini
+[env:esp32doit-devkit-v1]
+platform = espressif32
+board = esp32doit-devkit-v1   ; or your specific board, see: pio boards esp32
+framework = arduino
+```
+
+<br/>
+
 ## Dependencies
 
 - adafruit/Adafruit GFX Library@^1.12.0
 - adafruit/Adafruit SH110X@^2.1.12
-- madhephaestus/ESP32Encoder@^0.11.7
 - bblanchon/ArduinoJson@^7.4.1
 - arduinogetstarted/ezButton@^1.0.6
-- fhessel/esp32_https_server@^1.0.0
+
+Vendored locally in [lib/esp32_https_server](lib/esp32_https_server) (not pulled from the registry):
+
+- fhessel/esp32_https_server@^1.0.0, patched to use `mbedtls_sha1` instead of the classic-ESP32-only `hwcrypto/sha.h`, so it builds on ESP32-C3 too.
+
 
 ## Credits
 
