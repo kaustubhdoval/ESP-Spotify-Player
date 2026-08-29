@@ -14,7 +14,6 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <base64.h>
-#include <ESP32Encoder.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPSServer.hpp>
@@ -87,6 +86,9 @@ public:
     // WifiClient Secure Methods
     bool ensureConnection(const char *host);
     void closeConnection();
+    // Called from loop() while idle: pays the TLS handshake up front so a
+    // button press never lands on a stale connection and has to wait for one.
+    void maintainConnection(const char *host);
 
     // Public member variables
     bool accessTokenSet;
@@ -108,6 +110,7 @@ public:
 private:
     String accessToken;
     String refreshToken;
+    String connectedHost;
 };
 
 // Global instances (extern declarations)

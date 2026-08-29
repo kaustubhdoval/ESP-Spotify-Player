@@ -29,6 +29,33 @@ const char *spotify_root_ca PROGMEM =
     "bpD0ufovARTFXFZkAdl9h6g4U5+LXUZtXMYnhIHUfoyMo5tS58aI7Dd8KvvwVVo4\n"
     "chDYABPPTHPbqjc1qCmBaZx2vN4Ye5DUys/vZwP9BFohFrH/6j/f3IL16/RZkiMN\n"
     "JCqVJUzKoZHm1Lesh3Sz8W2jmdv51b2EQJ8HmA==\n"
+    "-----END CERTIFICATE-----\n"
+    // Starfield Root Certificate Authority - G2
+    // accounts.spotify.com (the OAuth token endpoint) chains to this root,
+    // while api.spotify.com chains to the DigiCert root above -- both are
+    // needed since mbedTLS accepts multiple concatenated CA certs here.
+    "-----BEGIN CERTIFICATE-----\n"
+    "MIID3TCCAsWgAwIBAgIBADANBgkqhkiG9w0BAQsFADCBjzELMAkGA1UEBhMCVVMx\n"
+    "EDAOBgNVBAgTB0FyaXpvbmExEzARBgNVBAcTClNjb3R0c2RhbGUxJTAjBgNVBAoT\n"
+    "HFN0YXJmaWVsZCBUZWNobm9sb2dpZXMsIEluYy4xMjAwBgNVBAMTKVN0YXJmaWVs\n"
+    "ZCBSb290IENlcnRpZmljYXRlIEF1dGhvcml0eSAtIEcyMB4XDTA5MDkwMTAwMDAw\n"
+    "MFoXDTM3MTIzMTIzNTk1OVowgY8xCzAJBgNVBAYTAlVTMRAwDgYDVQQIEwdBcml6\n"
+    "b25hMRMwEQYDVQQHEwpTY290dHNkYWxlMSUwIwYDVQQKExxTdGFyZmllbGQgVGVj\n"
+    "aG5vbG9naWVzLCBJbmMuMTIwMAYDVQQDEylTdGFyZmllbGQgUm9vdCBDZXJ0aWZp\n"
+    "Y2F0ZSBBdXRob3JpdHkgLSBHMjCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoC\n"
+    "ggEBAL3twQP89o/8ArFvW59I2Z154qK3A2FWGMNHttfKPTUuiUP3oWmb3ooa/RMg\n"
+    "nLRJdzIpVv257IzdIvpy3Cdhl+72WoTsbhm5iSzchFvVdPtrX8WJpRBSiUZV9Lh1\n"
+    "HOZ/5FSuS/hVclcCGfgXcVnrHigHdMWdSL5stPSksPNkN3mSwOxGXn/hbVNMYq/N\n"
+    "Hwtjuzqd+/x5AJhhdM8mgkBj87JyahkNmcrUDnXMN/uLicFZ8WJ/X7NfZTD4p7dN\n"
+    "dloedl40wOiWVpmKs/B/pM293DIxfJHP4F8R+GuqSVzRmZTRouNjWwl2tVZi4Ut0\n"
+    "HZbUJtQIBFnQmA4O5t78w+wfkPECAwEAAaNCMEAwDwYDVR0TAQH/BAUwAwEB/zAO\n"
+    "BgNVHQ8BAf8EBAMCAQYwHQYDVR0OBBYEFHwMMh+n2TB/xH1oo2Kooc6rB1snMA0G\n"
+    "CSqGSIb3DQEBCwUAA4IBAQARWfolTwNvlJk7mh+ChTnUdgWUXuEok21iXQnCoKjU\n"
+    "sHU48TRqneSfioYmUeYs0cYtbpUgSpIB7LiKZ3sx4mcujJUDJi5DnUox9g61DLu3\n"
+    "4jd/IroAow57UvtruzvE03lRTs2Q9GcHGcg8RnoNAX3FWOdt5oUwF5okxBDgBPfg\n"
+    "8n/Uqgr/Qh037ZTlZFkSIHc40zI+OIF1lnP6aI+xy84fxez6nH7PfrHxBy22/L/K\n"
+    "pL/QlwVKvOoYKAKQvVR4CSFx09F9HdkWsKlhPdAKACL8x3vLCWRFCztAgfd9fDL1\n"
+    "mMpYjn0q7pBZc2T5NnReJaH1ZgUufzkVqSr7UIuOhWn0\n"
     "-----END CERTIFICATE-----\n";
 
 // Global instances
@@ -121,8 +148,6 @@ bool SpotConn::refreshAuth()
     JsonDocument doc;
     String response;
 
-    accessTokenSet = false;
-
     String auth = "Basic " + base64::encode(
                                  String(CLIENT_ID) + ":" + String(CLIENT_SECRET));
 
@@ -207,7 +232,22 @@ bool SpotConn::getTrackInfo()
         return true;
     }
 
-    DeserializationError error = deserializeJson(doc, response);
+    // /v1/me/player returns 8-15 KB, most of it `available_markets` arrays we
+    // never look at. Filtering keeps those out of the JsonDocument entirely --
+    // far less heap churn and a much faster parse on the C3.
+    JsonDocument filter;
+    filter["is_playing"] = true;
+    filter["progress_ms"] = true;
+    filter["device"]["is_active"] = true;
+    filter["device"]["supports_volume"] = true;
+    filter["device"]["volume_percent"] = true;
+    filter["item"]["name"] = true;
+    filter["item"]["duration_ms"] = true;
+    filter["item"]["uri"] = true;
+    filter["item"]["artists"][0]["name"] = true;
+
+    DeserializationError error =
+        deserializeJson(doc, response, DeserializationOption::Filter(filter));
     if (error)
     {
         Serial.print(F("deserializeJson() failed: "));
@@ -288,10 +328,7 @@ bool SpotConn::getTrackInfo()
     lastSongPositionMs = currentSongPositionMs;
     success = true;
 
-    if (success)
-    {
-        externalDrawScreen();
-    }
+    externalDrawScreen();
 
     return success;
 }
@@ -323,13 +360,15 @@ bool SpotConn::togglePlay()
 
     if (ok)
     {
-        isPlaying = !isPlaying;
+        // isPlaying already holds the new state from the optimistic update
+        // above -- flipping again here would revert the screen.
         Serial.println(isPlaying ? "Now playing" : "Now paused");
     }
     else
     {
         Serial.println("Error toggling playback");
         isPlaying = oldState;
+        externalDrawScreen(); // roll the optimistic update back on screen
     }
 
     return ok;
@@ -391,7 +430,6 @@ bool SpotConn::skipForward()
     if (ok)
     {
         Serial.println("Skipped to next track");
-        getTrackInfo();
     }
     else
     {
@@ -421,7 +459,6 @@ bool SpotConn::skipBack()
     if (ok)
     {
         Serial.println("Skipped to previous track");
-        getTrackInfo();
     }
     else
     {
@@ -482,6 +519,7 @@ void SpotConn::initialize()
     secureServer = new HTTPSServer(cert, 443, 4);
 
     // Connect to WiFi
+    WiFi.mode(WIFI_STA);
     WiFi.begin(WIFI_SSID, PASSWORD);
     Serial.print("Connecting to WiFi");
 
@@ -491,7 +529,13 @@ void SpotConn::initialize()
         Serial.print(".");
     }
 
+    // Default power save (WIFI_PS_MIN_MODEM) parks the radio between DTIM
+    // beacons, adding up to a beacon interval of latency to every round trip.
+    // This player is mains powered, so keep the radio awake.
+    WiFi.setSleep(false);
+
     Serial.println("\nConnected to WiFi");
+    Serial.printf("WiFi RSSI: %d dBm (channel %d)\n", WiFi.RSSI(), WiFi.channel());
 
     // Set up web server
     ResourceNode *nodeRoot = new ResourceNode("/", "GET", &handleRoot);
@@ -528,6 +572,11 @@ bool SpotConn::ensureConnection(const char *host)
         Serial.println("Connection lost, reconnecting...");
         needsReconnect = true;
     }
+    else if (connectedHost != host)
+    {
+        Serial.println("Target host changed, reconnecting...");
+        needsReconnect = true;
+    }
     else if (currentTime - lastConnectionTime > CONNECTION_TIMEOUT)
     {
         Serial.println("Connection idle too long, reconnecting...");
@@ -542,7 +591,6 @@ bool SpotConn::ensureConnection(const char *host)
     if (needsReconnect)
     {
         secureClient.stop();
-        delay(100);
 
         if (!secureClient.connect(host, 443))
         {
@@ -551,12 +599,60 @@ bool SpotConn::ensureConnection(const char *host)
         }
 
         Serial.println("Connected to " + String(host));
+        connectedHost = host;
         requestCount = 0;
     }
 
     lastConnectionTime = currentTime;
     requestCount++;
     return true;
+}
+
+// Reconnects *now*, while nothing is waiting on it, if the connection is in a
+// state that would force ensureConnection() to reconnect on the next request.
+// Without this the 1-3s TLS handshake lands on whichever request comes next --
+// often a button press.
+void SpotConn::maintainConnection(const char *host)
+{
+    if (!accessTokenSet)
+    {
+        return;
+    }
+
+    bool stale =
+        !secureClient.connected() ||
+        connectedHost != host ||
+        (millis() - lastConnectionTime > CONNECTION_TIMEOUT) ||
+        (requestCount >= MAX_REQUESTS_PER_CONNECTION - 2);
+
+    if (!stale)
+    {
+        return;
+    }
+
+    // Back off after a failure, otherwise a downed network turns this into a
+    // tight connect() loop that starves the rest of loop().
+    static unsigned long prewarmRetryAfter = 0;
+    if (prewarmRetryAfter != 0 && (long)(millis() - prewarmRetryAfter) < 0)
+    {
+        return;
+    }
+
+    Serial.println("Pre-warming TLS connection");
+    secureClient.stop();
+
+    if (!secureClient.connect(host, 443))
+    {
+        Serial.println("Pre-warm connect failed, will retry on next request");
+        prewarmRetryAfter = millis() + 5000;
+        return;
+    }
+
+    prewarmRetryAfter = 0;
+
+    connectedHost = host;
+    requestCount = 0;
+    lastConnectionTime = millis();
 }
 
 void SpotConn::closeConnection()
@@ -587,122 +683,303 @@ bool httpsRequest(
 
     WiFiClientSecure &client = spotifyConnection.secureClient;
 
-    // ---- Request line ----
-    client.print(method + " " + path + " HTTP/1.1\r\n");
-    client.print("Host: " + String(host) + "\r\n");
-    client.print("User-Agent: ESP32\r\n");
-    client.print("Connection: keep-alive\r\n"); // Changed from "close"
+    // Build the whole request in one buffer and write it once. Every separate
+    // client.print() becomes its own TLS record and its own TCP segment, so
+    // splitting the request across seven writes invited Nagle/delayed-ACK
+    // stalls worth tens to hundreds of ms.
+    String request;
+    request.reserve(160 + headers.length() + body.length());
 
-    // ---- Custom headers ----
-    client.print(headers);
+    request += method;
+    request += ' ';
+    request += path;
+    request += " HTTP/1.1\r\nHost: ";
+    request += host;
+    request += "\r\nUser-Agent: ESP32\r\nConnection: keep-alive\r\n";
+    request += headers;
 
-    // ---- Content-Length if body exists ----
     if (body.length() > 0)
     {
-        client.print("Content-Length: ");
-        client.print(body.length());
-        client.print("\r\n");
+        request += "Content-Length: ";
+        request += body.length();
+        request += "\r\n";
     }
 
-    client.print("\r\n");
+    request += "\r\n";
+    request += body;
 
-    // ---- Body ----
-    if (body.length() > 0)
-    {
-        client.print(body);
-    }
+    client.print(request);
 
-    // ---- Read status line ----
-    unsigned long timeout = millis();
-    while (client.available() == 0)
-    {
-        if (millis() - timeout > 10000)
-        {
-            Serial.println("Request timeout");
-            spotifyConnection.closeConnection(); // Force reconnect on timeout
-            return false;
-        }
-        delay(10);
-    }
-
-    // Read and parse status line
-    String statusLine = client.readStringUntil('\n');
-
-    // ---- Read headers ----
+    // ---- Read the response ----
+    // Nothing below may use readStringUntil()/readString(). Those go through
+    // Stream::timedRead(), which on arduino-esp32 is a *busy spin with no
+    // yield*, once per byte, against a non-blocking socket. On the dual-core
+    // devkit that spin ran on core 1 while WiFi/lwIP owned core 0 and cost
+    // nothing; the single-core C3 has no such luxury -- the spin starves the
+    // lwIP task it is waiting on. That, plus a missed Content-Length dropping
+    // us into readString()'s full 10s timeout spin, was the ~25s per request.
+    String pending; // bytes pulled off the socket but not yet consumed
+    int consumed = 0;
+    bool headersDone = false;
     int contentLength = -1;
+    int statusCode = 0;
     bool chunked = false;
+    unsigned long lastData = millis();
 
-    while (client.connected() || client.available())
-    {
-        String line = client.readStringUntil('\n');
-        if (line == "\r")
-            break;
-
-        // Parse Content-Length
-        if (line.startsWith("Content-Length:"))
-        {
-            contentLength = line.substring(15).toInt();
-        }
-        // Check for chunked encoding
-        if (line.indexOf("Transfer-Encoding: chunked") >= 0)
-        {
-            chunked = true;
-        }
-    }
-
-    // ---- Read body ----
     responseBody = "";
 
-    if (contentLength == 0)
+    // --- Read and parse the header block ---
     {
-        // No body (e.g., 204 response)
+        char buf[512];
+
+        while (!headersDone)
+        {
+            int n = client.read((uint8_t *)buf, sizeof(buf));
+
+            if (n > 0)
+            {
+                pending.concat(buf, n);
+                lastData = millis();
+
+                int end = pending.indexOf("\r\n\r\n");
+                if (end < 0)
+                {
+                    if (pending.length() > 4096)
+                    {
+                        Serial.println("Response headers too large, aborting");
+                        spotifyConnection.closeConnection();
+                        return false;
+                    }
+                    continue;
+                }
+
+                // Parse the header lines, then keep whatever followed them --
+                // the first bytes of the body usually arrive in the same read.
+                int lineStart = 0;
+                bool isStatusLine = true;
+
+                while (lineStart < end)
+                {
+                    int lineEnd = pending.indexOf("\r\n", lineStart);
+                    if (lineEnd < 0 || lineEnd > end)
+                    {
+                        break;
+                    }
+
+                    String line = pending.substring(lineStart, lineEnd);
+                    lineStart = lineEnd + 2;
+
+                    if (isStatusLine)
+                    {
+                        isStatusLine = false;
+                        // "HTTP/1.1 204 No Content" -> 204
+                        int sp = line.indexOf(' ');
+                        if (sp > 0)
+                        {
+                            statusCode = line.substring(sp + 1, sp + 4).toInt();
+                        }
+                        continue;
+                    }
+
+                    // HTTP header names are case-insensitive and Spotify's edge
+                    // sends them lowercase. Matching "Content-Length:" exactly
+                    // meant contentLength stayed -1 on every single response,
+                    // which dropped us into the read-until-close path below.
+                    String lower = line;
+                    lower.toLowerCase();
+
+                    if (lower.startsWith("content-length:"))
+                    {
+                        contentLength = line.substring(15).toInt();
+                    }
+                    else if (lower.indexOf("transfer-encoding:") >= 0 &&
+                             lower.indexOf("chunked") >= 0)
+                    {
+                        chunked = true;
+                    }
+                }
+
+                consumed = end + 4;
+                headersDone = true;
+            }
+            else
+            {
+                if (!client.connected() && client.available() == 0)
+                {
+                    Serial.println("Connection closed before headers completed");
+                    spotifyConnection.closeConnection();
+                    return false;
+                }
+                if (millis() - lastData > 10000)
+                {
+                    Serial.println("Request timeout");
+                    spotifyConnection.closeConnection();
+                    return false;
+                }
+                delay(1); // real vTaskDelay -- yields the core, unlike yield()
+            }
+        }
+    }
+
+    // Body bytes that arrived alongside the headers.
+    String carryOver = pending.substring(consumed);
+    pending = String();
+
+    // --- Read the body ---
+    // 204/304 are defined to carry no body and Spotify sends them without a
+    // Content-Length, so without this they fell through to the read-until-close
+    // path and burned its full 2s idle timeout on every no-active-device poll.
+    if (contentLength == 0 || statusCode == 204 || statusCode == 304)
+    {
         return true;
     }
     else if (contentLength > 0)
     {
-        // Read exact content length
-        int totalRead = 0;
-        while (totalRead < contentLength && client.connected())
+        responseBody.reserve(contentLength + 1);
+        responseBody += carryOver;
+
+        // Never let a long carry-over run past the declared body length
+        if ((int)responseBody.length() > contentLength)
         {
-            if (client.available())
+            responseBody.remove(contentLength);
+        }
+
+        char buf[512];
+        lastData = millis();
+
+        while ((int)responseBody.length() < contentLength)
+        {
+            int want = contentLength - (int)responseBody.length();
+            if (want > (int)sizeof(buf))
             {
-                char c = client.read();
-                responseBody += c;
-                totalRead++;
+                want = sizeof(buf);
+            }
+
+            int n = client.read((uint8_t *)buf, want);
+
+            if (n > 0)
+            {
+                responseBody.concat(buf, n);
+                lastData = millis();
+            }
+            else
+            {
+                if (!client.connected() && client.available() == 0)
+                {
+                    break;
+                }
+                if (millis() - lastData > 5000)
+                {
+                    Serial.println("Body read stalled, aborting");
+                    break;
+                }
+                delay(1);
             }
         }
     }
     else if (chunked)
     {
-        // Handle chunked encoding
-        while (client.connected() || client.available())
+        // Decode chunks out of a sliding window, topping it up from the socket.
+        String window = carryOver;
+        int pos = 0;
+        char buf[512];
+        lastData = millis();
+        bool done = false;
+
+        while (!done)
         {
-            String chunkSizeLine = client.readStringUntil('\n');
-            int chunkSize = strtol(chunkSizeLine.c_str(), NULL, 16);
+            // Need a complete "<hex>\r\n" size line
+            int crlf = window.indexOf("\r\n", pos);
+            if (crlf < 0)
+            {
+                int n = client.read((uint8_t *)buf, sizeof(buf));
+                if (n > 0)
+                {
+                    window.concat(buf, n);
+                    lastData = millis();
+                }
+                else if ((!client.connected() && client.available() == 0) ||
+                         millis() - lastData > 5000)
+                {
+                    break;
+                }
+                else
+                {
+                    delay(1);
+                }
+                continue;
+            }
+
+            int chunkSize = strtol(window.substring(pos, crlf).c_str(), NULL, 16);
+            int dataStart = crlf + 2;
 
             if (chunkSize == 0)
-                break; // Last chunk
-
-            for (int i = 0; i < chunkSize && client.available(); i++)
             {
-                responseBody += (char)client.read();
+                break; // last chunk
             }
-            client.readStringUntil('\n');
+
+            // Wait until the whole chunk plus its trailing CRLF is buffered
+            while ((int)window.length() < dataStart + chunkSize + 2)
+            {
+                int n = client.read((uint8_t *)buf, sizeof(buf));
+                if (n > 0)
+                {
+                    window.concat(buf, n);
+                    lastData = millis();
+                }
+                else if ((!client.connected() && client.available() == 0) ||
+                         millis() - lastData > 5000)
+                {
+                    done = true;
+                    break;
+                }
+                else
+                {
+                    delay(1);
+                }
+            }
+
+            if (done)
+            {
+                break;
+            }
+
+            responseBody.concat(window.c_str() + dataStart, chunkSize);
+            pos = dataStart + chunkSize + 2; // skip the chunk's trailing CRLF
+
+            // Drop what we have consumed so the window cannot grow unbounded
+            if (pos > 1024)
+            {
+                window.remove(0, pos);
+                pos = 0;
+            }
         }
     }
     else
     {
-        // No Content-Length header, read until connection closes or timeout
-        timeout = millis();
+        // Neither Content-Length nor chunked: the only case where we genuinely
+        // have to read until the peer closes. Bounded, and no per-byte spin.
+        responseBody += carryOver;
+
+        char buf[512];
+        lastData = millis();
+
         while (client.connected() || client.available())
         {
-            if (client.available())
+            int n = client.read((uint8_t *)buf, sizeof(buf));
+            if (n > 0)
             {
-                responseBody += client.readString();
-                timeout = millis();
+                responseBody.concat(buf, n);
+                lastData = millis();
             }
-            if (millis() - timeout > 2000)
-                break; // 2 second timeout for remaining data
+            else
+            {
+                if (millis() - lastData > 2000)
+                {
+                    break;
+                }
+                delay(1);
+            }
         }
     }
 

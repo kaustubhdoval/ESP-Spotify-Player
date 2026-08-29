@@ -4,56 +4,157 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SH110X.h>
-#include <ESP32Encoder.h>
 #include <ezButton.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/queue.h>
+#include <driver/i2c.h> // i2c_set_timeout -- see the clamp in setup()
+#ifdef ENABLE_ROTARY_ENCODER
+#include "SoftHalfQuadEncoder.h"
+#endif
 
 #include "spotifyClient.h"
 
-// Pin Definitions
+// Pin Definitions -- defaults are the custom PCB's wiring; the `devkit`
+// PlatformIO environment overrides these via build_flags.
+#ifndef PREV_BTN_PIN
 #define PREV_BTN_PIN 5
-#define PLAY_BTN_PIN 18
-#define NEXT_BTN_PIN 19
+#endif
+#ifndef PLAY_BTN_PIN
+#define PLAY_BTN_PIN 4
+#endif
+#ifndef NEXT_BTN_PIN
+#define NEXT_BTN_PIN 3
+#endif
+#ifdef ENABLE_ROTARY_ENCODER
+#ifndef ENC_CLK_PIN
 #define ENC_CLK_PIN 4
+#endif
+#ifndef ENC_DT_PIN
 #define ENC_DT_PIN 2
+#endif
+#ifndef ENC_SW_PIN
 #define ENC_SW_PIN 15
+#endif
+#endif
 
 // OLED Definitions
 #define I2C_ADDRESS 0x3c
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_RESET -1
+// Defaults are the custom PCB's wiring (IO6/IO7, not this chip's default
+// I2C pins IO8/IO9); the `devkit` environment overrides these too.
+#ifndef OLED_SDA_PIN
+#define OLED_SDA_PIN 6
+#endif
+#ifndef OLED_SCL_PIN
+#define OLED_SCL_PIN 7
+#endif
 
 // Objects
-Adafruit_SH1106G display = Adafruit_SH1106G(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-ESP32Encoder encoder;
+Adafruit_SH1106G display = Adafruit_SH1106G(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET, 400000, 400000);
+#ifdef ENABLE_ROTARY_ENCODER
+SoftHalfQuadEncoder encoder;
+#endif
 
 ezButton prevBtn(PREV_BTN_PIN);
 ezButton playBtn(PLAY_BTN_PIN);
 ezButton nextBtn(NEXT_BTN_PIN);
+#ifdef ENABLE_ROTARY_ENCODER
 ezButton encSwBtn(ENC_SW_PIN);
+#endif
 
 // Timing variables
 unsigned long lastApiRefresh = 0;
+unsigned long nextTrackRefresh = 0;
 
-// Interrupt flags
-volatile bool buttonPressed = false;
-volatile bool encoderPressed = false;
+#define POST_ACTION_REFRESH_DELAY 400 // ms to let Spotify settle after an action
 
-// ISR handlers
-void IRAM_ATTR buttonISR()
+// Button events, produced by buttonTask (dedicated FreeRTOS task) and
+// consumed by handleButtons() in the main loop. Polling + debouncing lives
+// in its own task so presses are detected (and logged) immediately even
+// while loop() is blocked on a Spotify HTTPS request.
+enum ButtonEvent
 {
-  buttonPressed = true;
+  BTN_PREV,
+  BTN_PLAY,
+  BTN_NEXT
+};
+QueueHandle_t buttonQueue; // holds at most one pending, not-yet-started event
+
+// Set the instant a press is accepted into the queue, cleared once
+// handleButtons() finishes the resulting Spotify call
+volatile bool actionInProgress = false;
+
+void buttonTask(void *pvParameters)
+{
+  for (;;)
+  {
+    prevBtn.loop();
+    playBtn.loop();
+    nextBtn.loop();
+#ifdef ENABLE_ROTARY_ENCODER
+    encSwBtn.loop();
+#endif
+
+    ButtonEvent evt;
+    bool pressed = false;
+    const char *label = nullptr;
+
+    if (prevBtn.isPressed())
+    {
+      evt = BTN_PREV;
+      pressed = true;
+      label = "Previous";
+    }
+    else if (playBtn.isPressed())
+    {
+      evt = BTN_PLAY;
+      pressed = true;
+      label = "Play/Pause";
+    }
+    else if (nextBtn.isPressed())
+    {
+      evt = BTN_NEXT;
+      pressed = true;
+      label = "Next";
+    }
+
+    if (pressed)
+    {
+      // Logged immediately, regardless of what loop() is currently doing
+      Serial.printf("%s button pressed\n", label);
+
+      if (actionInProgress)
+      {
+        Serial.println("  -> ignored, previous action still in progress");
+      }
+      else
+      {
+        actionInProgress = true;
+        if (xQueueSend(buttonQueue, &evt, 0) != pdTRUE)
+        {
+          Serial.println("  -> queue full, dropping");
+          actionInProgress = false;
+        }
+      }
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(5));
+  }
 }
 
-void IRAM_ATTR encoderSwitchISR()
-{
-  encoderPressed = true;
-}
+// False when the panel does not ACK at boot. Every display call is then
+// skipped: (If display does not work, then skip trying to display to it)
+bool displayPresent = false;
 
 // Forward declarations
 String truncateString(const String &input, int maxLength);
 void handleButtons();
+#ifdef ENABLE_ROTARY_ENCODER
 void handleVolumeControl();
+#endif
 void drawScreen();
 
 // Bitmap Definitions
@@ -63,6 +164,11 @@ static const unsigned char PROGMEM configuring[] = {0x80, 0xe0, 0x00, 0x00, 0x00
 
 void drawScreen()
 {
+  if (!displayPresent)
+  {
+    return; // headless: skip the ~1s-per-write I2C stall entirely
+  }
+
   display.clearDisplay();
 
   if (!spotifyConnection.getActiveStatus())
@@ -90,7 +196,12 @@ void drawScreen()
     // Draw progress bar
     int barY = 30;
     int barHeight = 8;
-    int barWidth = map(spotifyConnection.getCurrentPositionMs(), 0, spotifyConnection.getCurrentSong().durationMs, 0, SCREEN_WIDTH);
+    // map() logs an error and misbehaves when durationMs is 0, which happens
+    // whenever the player reports a device but no track.
+    int durationMs = spotifyConnection.getCurrentSong().durationMs;
+    int barWidth = (durationMs > 0)
+                       ? map(spotifyConnection.getCurrentPositionMs(), 0, durationMs, 0, SCREEN_WIDTH)
+                       : 0;
 
     display.drawRect(0, barY, SCREEN_WIDTH, barHeight, SH110X_WHITE);
     display.fillRect(0, barY, barWidth, barHeight, SH110X_WHITE);
@@ -103,6 +214,7 @@ void drawScreen()
     display.setCursor(110, 55);
     display.print(spotifyConnection.volCtrl ? String(spotifyConnection.currVol) : "N/A");
   }
+
   display.display();
 }
 
@@ -114,70 +226,52 @@ String truncateString(const String &input, int maxLength)
   return input.substring(0, maxLength - 3) + "...";
 }
 
-// Button handler function
+// Button handler function - drains events produced by buttonTask.
+// buttonTask already logs the press and refuses to enqueue a new one while
+// actionInProgress is set, so every event reaching here is meant to run now.
 void handleButtons()
 {
-  // Only process if interrupt flag is set
-  if (!buttonPressed && !encoderPressed)
+  ButtonEvent evt;
+  if (xQueueReceive(buttonQueue, &evt, 0) != pdTRUE)
   {
     return;
   }
 
-  // Add debounce delay
-  static unsigned long lastButtonTime = 0;
-  unsigned long currentTime = millis();
-
-  if (currentTime - lastButtonTime < 150)
+  switch (evt)
   {
-    buttonPressed = false;
-    encoderPressed = false;
-    return;
-  }
-
-  bool actionTaken = false;
-
-  if (prevBtn.isPressed())
-  {
-    Serial.println("Previous button pressed");
+  case BTN_PREV:
     spotifyConnection.skipBack();
-    actionTaken = true;
-  }
-  else if (playBtn.isPressed())
-  {
-    Serial.println("Play button pressed");
+    // The track changed but we don't know to what yet -- reset the progress
+    // bar so the screen reacts now, and let the deferred refresh fill in the
+    // new title/artist.
+    spotifyConnection.currentSongPositionMs = 0;
+    drawScreen();
+    break;
+  case BTN_PLAY:
+    // togglePlay() already draws the new play/pause state optimistically.
     spotifyConnection.togglePlay();
-    actionTaken = true;
-  }
-  else if (nextBtn.isPressed())
-  {
-    Serial.println("Next button pressed");
+    break;
+  case BTN_NEXT:
     spotifyConnection.skipForward();
-    actionTaken = true;
+    spotifyConnection.currentSongPositionMs = 0;
+    drawScreen();
+    break;
   }
-  else if (encSwBtn.isPressed())
+
+  // Schedule the confirming fetch instead of blocking the press on it. This
+  // halves the round trips a press has to wait for.
+  nextTrackRefresh = millis() + POST_ACTION_REFRESH_DELAY;
+  if (nextTrackRefresh == 0)
   {
-    Serial.println("Encoder switch pressed");
-    spotifyConnection.togglePlay();
-    actionTaken = true;
+    nextTrackRefresh = 1; // 0 is the "nothing scheduled" sentinel
   }
 
-  if (actionTaken)
-  {
-    spotifyConnection.getTrackInfo();
-    lastButtonTime = currentTime;
-  }
-
-  // Reset flags
-  buttonPressed = false;
-  encoderPressed = false;
-
-  prevBtn.loop();
-  playBtn.loop();
-  nextBtn.loop();
-  encSwBtn.loop();
+  actionInProgress = false;
 }
 
-// Volume control handler
+// Volume control handler -- only compiled in when a rotary encoder is
+// present (see ENABLE_ROTARY_ENCODER in platformio.ini's `devkit` env).
+#ifdef ENABLE_ROTARY_ENCODER
 void handleVolumeControl()
 {
   if (!spotifyConnection.volCtrl)
@@ -212,6 +306,7 @@ void handleVolumeControl()
     volumeChangePending = false;
   }
 }
+#endif
 
 // Global flag for server state
 bool serverOn = true;
@@ -219,44 +314,72 @@ bool serverOn = true;
 void setup()
 {
   // Initialize serial communication
-  Serial.begin(9600);
+  Serial.begin(115200);
   Serial.println("Starting ESP32 Spotify Player");
 
   // Initialize display
+  Wire.begin(OLED_SDA_PIN, OLED_SCL_PIN);
+  Wire.setClock(400000);
+
+  i2c_set_timeout(I2C_NUM_0, 20); // 2^20 / 80MHz ~= 13ms
+
   delay(250); // Wait for OLED to initialize
-  display.begin(I2C_ADDRESS, true);
+
+  displayPresent = display.begin(I2C_ADDRESS, true);
+  if (!displayPresent)
+  {
+    // Every display call is skipped from here on, so the player stays fully
+    // responsive while the bus is dead instead of eating 1s per I2C write.
+    Serial.printf("OLED not responding at 0x%02X -- running headless\n", I2C_ADDRESS);
+  }
 
   // Show splash screen
-  display.clearDisplay();
-  display.drawBitmap(9, 8, splash_screen, 112, 51, 1);
-  display.display();
+  if (displayPresent)
+  {
+    display.clearDisplay();
+    display.drawBitmap(9, 8, splash_screen, 112, 51, 1);
+    display.display();
+  }
   delay(700);
 
   // Set up button pins
   pinMode(PLAY_BTN_PIN, INPUT_PULLUP);
   pinMode(PREV_BTN_PIN, INPUT_PULLUP);
   pinMode(NEXT_BTN_PIN, INPUT_PULLUP);
+#ifdef ENABLE_ROTARY_ENCODER
   pinMode(ENC_SW_PIN, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(PLAY_BTN_PIN), buttonISR, FALLING);
-  attachInterrupt(digitalPinToInterrupt(PREV_BTN_PIN), buttonISR, FALLING);
-  attachInterrupt(digitalPinToInterrupt(NEXT_BTN_PIN), buttonISR, FALLING);
-  attachInterrupt(digitalPinToInterrupt(ENC_SW_PIN), encoderSwitchISR, FALLING);
+#endif
 
+  // 20ms debounce (ezButton defaults to 0)
+  prevBtn.setDebounceTime(20);
+  playBtn.setDebounceTime(20);
+  nextBtn.setDebounceTime(20);
+
+  buttonQueue = xQueueCreate(8, sizeof(ButtonEvent));
+  xTaskCreate(buttonTask, "ButtonTask", 2048, NULL, 2, NULL);
+
+#ifdef ENABLE_ROTARY_ENCODER
   // Set up rotary encoder
   encoder.attachHalfQuad(ENC_DT_PIN, ENC_CLK_PIN);
+#endif
 
   setDrawScreenCallback(drawScreen);
   spotifyConnection.initialize();
+#ifdef ENABLE_ROTARY_ENCODER
   encoder.setCount(spotifyConnection.getCurrentVolume() / 5);
+#endif
 
   // Show configuration screen
-  display.clearDisplay();
-  display.setTextColor(1);
-  display.setTextWrap(false);
-  display.setCursor(5, 38);
-  display.print("ESP IP:" + WiFi.localIP().toString());
-  display.drawBitmap(14, 15, configuring, 102, 15, 1);
-  display.display();
+  if (displayPresent)
+  {
+    display.clearDisplay();
+    display.setTextColor(1);
+    display.setTextWrap(false);
+    display.setCursor(5, 38);
+    display.print("ESP IP:" + WiFi.localIP().toString());
+    display.drawBitmap(14, 15, configuring, 102, 15, 1);
+    display.display();
+  }
 }
 
 void loop()
@@ -277,26 +400,53 @@ void loop()
     serverOn = false;
   }
 
-  // Refresh access token if needed
-  if ((currentMillis - spotifyConnection.tokenStartTime) / 1000 > spotifyConnection.tokenExpireTime - 60)
+  // Refresh access token if needed. Backed off on failure
+  static unsigned long refreshRetryAfter = 0;
+  if ((currentMillis - spotifyConnection.tokenStartTime) / 1000 > spotifyConnection.tokenExpireTime - 60 &&
+      (refreshRetryAfter == 0 || (long)(currentMillis - refreshRetryAfter) >= 0))
   {
     Serial.println("Refreshing token");
     if (spotifyConnection.refreshAuth())
     {
       Serial.println("Token refreshed successfully");
+      refreshRetryAfter = 0;
+    }
+    else
+    {
+      Serial.println("Token refresh failed, retrying in 10s");
+      refreshRetryAfter = millis() + 10000;
     }
   }
 
   // Handle user inputs
   handleButtons();
+#ifdef ENABLE_ROTARY_ENCODER
   handleVolumeControl();
+#endif
 
-  // Update track info periodically
+  // Update track info periodically, or sooner if a button press scheduled a
+  // confirming fetch.
   unsigned long pollInterval = spotifyConnection.isPlaying ? API_REFRESH_INTERVAL : 30000; // 30s when paused
-  if (currentMillis - lastApiRefresh > pollInterval)
+  bool refreshDue = (currentMillis - lastApiRefresh > pollInterval);
+
+  if (nextTrackRefresh != 0 && (long)(currentMillis - nextTrackRefresh) >= 0)
+  {
+    refreshDue = true;
+    nextTrackRefresh = 0;
+  }
+
+  if (refreshDue)
   {
     spotifyConnection.getTrackInfo();
     lastApiRefresh = currentMillis;
+    return; // re-enter loop() so a press queued during the fetch runs next
+  }
+
+  // Nothing pending: spend the idle time paying off any TLS handshake that
+  // would otherwise be charged to the next button press.
+  if (!actionInProgress && nextTrackRefresh == 0)
+  {
+    spotifyConnection.maintainConnection("api.spotify.com");
   }
 }
 
