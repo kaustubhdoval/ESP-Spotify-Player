@@ -18,7 +18,11 @@ A hardware Spotify controller: buttons for play/pause/skip, a 128x64 OLED showin
 <p align="center">
   <img src="assets/pcb.jpeg" alt="Assembled custom PCB" width="500">
 </p>
-
+<p align="center">
+  <em>
+  Thanks to <a href="https://www.pcbway.com" target="_b;ank">PCBWay</a> for sponsoring fabrication!
+  </em>
+</p>
 <br/>
 
 ## Features
