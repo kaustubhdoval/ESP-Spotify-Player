@@ -9,36 +9,61 @@
 #include <freertos/task.h>
 #include <freertos/queue.h>
 #include <driver/i2c.h> // i2c_set_timeout -- see the clamp in setup()
-// #include "SoftHalfQuadEncoder.h" // Encoder dropped from PCB
+#ifdef ENABLE_ROTARY_ENCODER
+#include "SoftHalfQuadEncoder.h"
+#endif
 
 #include "spotifyClient.h"
 
-// Pin Definitions
+// Pin Definitions -- defaults are the custom PCB's wiring; the `devkit`
+// PlatformIO environment overrides these via build_flags.
+#ifndef PREV_BTN_PIN
 #define PREV_BTN_PIN 5
+#endif
+#ifndef PLAY_BTN_PIN
 #define PLAY_BTN_PIN 4
+#endif
+#ifndef NEXT_BTN_PIN
 #define NEXT_BTN_PIN 3
-// Encoder dropped from PCB - GPIO2 (ENC_DT_PIN) is a strapping pin and was
-// #define ENC_CLK_PIN 4
-// #define ENC_DT_PIN 2
-// #define ENC_SW_PIN 15
+#endif
+#ifdef ENABLE_ROTARY_ENCODER
+#ifndef ENC_CLK_PIN
+#define ENC_CLK_PIN 4
+#endif
+#ifndef ENC_DT_PIN
+#define ENC_DT_PIN 2
+#endif
+#ifndef ENC_SW_PIN
+#define ENC_SW_PIN 15
+#endif
+#endif
 
 // OLED Definitions
 #define I2C_ADDRESS 0x3c
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_RESET -1
-// Custom PCB wires I2C to IO6 (SDA) / IO7 (SCL), not this board's default I2C pins (IO8/IO9)
+// Defaults are the custom PCB's wiring (IO6/IO7, not this chip's default
+// I2C pins IO8/IO9); the `devkit` environment overrides these too.
+#ifndef OLED_SDA_PIN
 #define OLED_SDA_PIN 6
+#endif
+#ifndef OLED_SCL_PIN
 #define OLED_SCL_PIN 7
+#endif
 
 // Objects
 Adafruit_SH1106G display = Adafruit_SH1106G(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET, 400000, 400000);
-// SoftHalfQuadEncoder encoder; // Encoder dropped from PCB
+#ifdef ENABLE_ROTARY_ENCODER
+SoftHalfQuadEncoder encoder;
+#endif
 
 ezButton prevBtn(PREV_BTN_PIN);
 ezButton playBtn(PLAY_BTN_PIN);
 ezButton nextBtn(NEXT_BTN_PIN);
-// ezButton encSwBtn(ENC_SW_PIN); // Encoder dropped from PCB
+#ifdef ENABLE_ROTARY_ENCODER
+ezButton encSwBtn(ENC_SW_PIN);
+#endif
 
 // Timing variables
 unsigned long lastApiRefresh = 0;
@@ -69,6 +94,9 @@ void buttonTask(void *pvParameters)
     prevBtn.loop();
     playBtn.loop();
     nextBtn.loop();
+#ifdef ENABLE_ROTARY_ENCODER
+    encSwBtn.loop();
+#endif
 
     ButtonEvent evt;
     bool pressed = false;
@@ -124,7 +152,9 @@ bool displayPresent = false;
 // Forward declarations
 String truncateString(const String &input, int maxLength);
 void handleButtons();
+#ifdef ENABLE_ROTARY_ENCODER
 void handleVolumeControl();
+#endif
 void drawScreen();
 
 // Bitmap Definitions
@@ -239,41 +269,44 @@ void handleButtons()
   actionInProgress = false;
 }
 
-// Volume control handler - Encoder dropped from PCB
-// void handleVolumeControl()
-// {
-//   if (!spotifyConnection.volCtrl)
-//   {
-//     return;
-//   }
-//
-//   static int lastEncoderCount = 0;
-//   static unsigned long lastVolumeChange = 0;
-//   static bool volumeChangePending = false;
-//
-//   int currentCount = encoder.getCount();
-//
-//   // Detect encoder movement
-//   if (currentCount != lastEncoderCount)
-//   {
-//     lastEncoderCount = currentCount;
-//     lastVolumeChange = millis();
-//     volumeChangePending = true;
-//
-//     // Update display immediately with new volume (optimistic update)
-//     int newVolume = constrain(currentCount * 5, 0, 100);
-//     spotifyConnection.currVol = newVolume;
-//     drawScreen(); // Show new volume immediately
-//   }
-//
-//   // Send API request after encoder stops moving for 500ms
-//   if (volumeChangePending && (millis() - lastVolumeChange > 500))
-//   {
-//     int newVolume = currentCount * 5;
-//     spotifyConnection.adjustVolume(newVolume);
-//     volumeChangePending = false;
-//   }
-// }
+// Volume control handler -- only compiled in when a rotary encoder is
+// present (see ENABLE_ROTARY_ENCODER in platformio.ini's `devkit` env).
+#ifdef ENABLE_ROTARY_ENCODER
+void handleVolumeControl()
+{
+  if (!spotifyConnection.volCtrl)
+  {
+    return;
+  }
+
+  static int lastEncoderCount = 0;
+  static unsigned long lastVolumeChange = 0;
+  static bool volumeChangePending = false;
+
+  int currentCount = encoder.getCount();
+
+  // Detect encoder movement
+  if (currentCount != lastEncoderCount)
+  {
+    lastEncoderCount = currentCount;
+    lastVolumeChange = millis();
+    volumeChangePending = true;
+
+    // Update display immediately with new volume (optimistic update)
+    int newVolume = constrain(currentCount * 5, 0, 100);
+    spotifyConnection.currVol = newVolume;
+    drawScreen(); // Show new volume immediately
+  }
+
+  // Send API request after encoder stops moving for 500ms
+  if (volumeChangePending && (millis() - lastVolumeChange > 500))
+  {
+    int newVolume = currentCount * 5;
+    spotifyConnection.adjustVolume(newVolume);
+    volumeChangePending = false;
+  }
+}
+#endif
 
 // Global flag for server state
 bool serverOn = true;
@@ -313,7 +346,9 @@ void setup()
   pinMode(PLAY_BTN_PIN, INPUT_PULLUP);
   pinMode(PREV_BTN_PIN, INPUT_PULLUP);
   pinMode(NEXT_BTN_PIN, INPUT_PULLUP);
-  // pinMode(ENC_SW_PIN, INPUT_PULLUP); // Encoder dropped from PCB
+#ifdef ENABLE_ROTARY_ENCODER
+  pinMode(ENC_SW_PIN, INPUT_PULLUP);
+#endif
 
   // 20ms debounce (ezButton defaults to 0)
   prevBtn.setDebounceTime(20);
@@ -323,12 +358,16 @@ void setup()
   buttonQueue = xQueueCreate(8, sizeof(ButtonEvent));
   xTaskCreate(buttonTask, "ButtonTask", 2048, NULL, 2, NULL);
 
-  // Set up rotary encoder - Encoder dropped from PCB
-  // encoder.attachHalfQuad(ENC_DT_PIN, ENC_CLK_PIN);
+#ifdef ENABLE_ROTARY_ENCODER
+  // Set up rotary encoder
+  encoder.attachHalfQuad(ENC_DT_PIN, ENC_CLK_PIN);
+#endif
 
   setDrawScreenCallback(drawScreen);
   spotifyConnection.initialize();
-  // encoder.setCount(spotifyConnection.getCurrentVolume() / 5); // Encoder dropped from PCB
+#ifdef ENABLE_ROTARY_ENCODER
+  encoder.setCount(spotifyConnection.getCurrentVolume() / 5);
+#endif
 
   // Show configuration screen
   if (displayPresent)
@@ -381,7 +420,9 @@ void loop()
 
   // Handle user inputs
   handleButtons();
-  // handleVolumeControl(); // Encoder dropped from PCB
+#ifdef ENABLE_ROTARY_ENCODER
+  handleVolumeControl();
+#endif
 
   // Update track info periodically, or sooner if a button press scheduled a
   // confirming fetch.
