@@ -3,14 +3,16 @@
   <p align="center">
     A Physical Spotify Remote, built around a custom ESP32-C3 PCB.
     <br />
-    <a href="https://github.com/kaustubhdoval/ESP-Spotify-Player"><strong>Explore the docs »</strong></a>
     ·
     <a href="https://github.com/kaustubhdoval/ESP-Spotify-Player/issues">Report Bug</a>
     ·
     <a href="https://github.com/kaustubhdoval/ESP-Spotify-Player/issues">Request Feature</a>
+    ·
   </p>
 
-A hardware Spotify controller: buttons for play/pause/skip, a 128x64 OLED showing the current track and playback progress, and an on-device HTTPS server that handles the Spotify OAuth flow so no companion app or cloud middleman is needed. Ships as a from-scratch **KiCad PCB** (ESP32-C3) and also builds for a plain **ESP32 devkit** if you don't want to fab a board.
+A Hardware Spotify Controller: buttons for play/pause/skip, a 128x64 OLED showing the current track and playback progress, and an on-device HTTPS server that handles the Spotify OAuth flow.
+
+Ships as a from-scratch **KiCad PCB** (ESP32-C3) and also builds for a plain **ESP32 devkit** if you don't want to fab a board.
 
 <p align="center">
   <img src="assets/demo.gif" alt="Demo of the Spotify player controlling playback" width="500">
@@ -19,10 +21,9 @@ A hardware Spotify controller: buttons for play/pause/skip, a 128x64 OLED showin
   <img src="assets/pcb.jpeg" alt="Assembled custom PCB" width="500">
 </p>
 <p align="center">
-  <em>
-  Thanks to <a href="https://www.pcbway.com" target="_b;ank">PCBWay</a> for sponsoring fabrication!
-  </em>
-</p>
+    Thanks to <a href="https://www.pcbway.com">PCBWay</a> for sponsoring fabrication!
+  </p>
+
 <br/>
 
 ## Features
@@ -30,7 +31,7 @@ A hardware Spotify controller: buttons for play/pause/skip, a 128x64 OLED showin
 - Play/pause, skip forward, skip back - instant, optimistic UI (screen updates before the Spotify API confirms)
 - Live track name, artist, and playback-progress bar on a 128x64 SH1106 OLED
 - Self-hosted OAuth: the ESP32 serves the Spotify login/callback pages itself over HTTPS, no server or app required
-- Runs on a custom two-layer PCB (KiCad, ESP32-C3) **or** an off-the-shelf ESP32 devkit - see [Hardware](#hardware)
+- Runs on a custom four-layer PCB (KiCad, ESP32-C3) **or** an off-the-shelf ESP32 devkit - see [Hardware](#hardware)
 
 <br/>
 
@@ -86,7 +87,7 @@ No rotary encoder on this board - GPIO2 is a strapping pin on ESP32-C3, so it wa
 
 The board is designed in KiCad. You can browse it interactively, no install required:
 
-[**Open in KiCanvas »**](https://kicanvas.org/?github=https%3A%2F%2Fgithub.com%2Fkaustubhdoval%2FESP-Spotify-Player%2Fblob%2Fmain%2Fpcb%2FspotifyPlayerPcb.kicad_pro)
+#### [**Open in KiCanvas »**](https://kicanvas.org/?github=https%3A%2F%2Fgithub.com%2Fkaustubhdoval%2FESP-Spotify-Player%2Fblob%2Fmain%2Fpcb%2FspotifyPlayerPcb.kicad_pro)
 
 Or open the files directly: [schematic](pcb/spotifyPlayerPcb.kicad_sch) · [PCB layout](pcb/spotifyPlayerPcb.kicad_pcb) · [assembly drawing](pcb/plots/spotifyPlayerPcb__Assembly.pdf) · [fab output](pcb/output/spotifyPlayerPcb.zip)
 
@@ -106,7 +107,9 @@ You need an **application registered on the Spotify Developer Dashboard** with t
    pio run -e devkit -t upload   # generic ESP32 devkit
    ```
 
-   If PlatformIO can't find/upload to your board directly (common over USB-serial adapters), flash the built binaries with `esptool` instead. Just build first (`pio run -e pcb`), then:
+   > Custom PCB only: the board has no auto-reset circuit, just bare BOOT/RESET buttons. Hold **BOOT**, tap **RESET**, then release **BOOT** right as `pio run -t upload` starts trying to connect, or it'll fail with "Failed to connect to ESP32".
+
+   If PlatformIO still can't find/upload to your board, flash the built binaries with `esptool` directly instead. Just build first (`pio run -e pcb`), then:
 
    ```sh
    esptool --chip esp32c3 --port COM3 write-flash ^
@@ -115,9 +118,14 @@ You need an **application registered on the Spotify Developer Dashboard** with t
      0x10000 .pio\build\pcb\firmware.bin
    ```
 
-   For a `devkit` build, swap `--chip esp32c3` for `--chip esp32` and `.pio\build\pcb\` for `.pio\build\devkit\`. Adjust `COM3` to your board's port.
+   For a `devkit` build, swap `--chip esp32c3` for `--chip esp32` and `.pio\build\pcb\` for `.pio\build\devkit\`. Adjust `COM3` to your board's port. (This is the newer standalone `esptool` v5+ syntax; PlatformIO's bundled `esptool.py` uses `write_flash` with an underscore instead.)
 
-4. Open the Serial Monitor (115200 baud) or check the OLED for the ESP's IP address.
+4. Check the ESP's IP address on the OLED, or via the serial monitor:
+
+   ```sh
+   pio device monitor -e pcb      # or -e devkit
+   ```
+
 5. Add `https://<ESP_IP>/callback` as a Redirect URI on your Spotify app dashboard, and set the same value as `REDIRECT_URI` in `secrets.h`.
 6. Re-flash with the updated `secrets.h`, then navigate to `https://<ESP_IP>` and log in with Spotify.
 
@@ -140,4 +148,7 @@ Vendored locally in [lib/esp32_https_server](lib/esp32_https_server) (not pulled
 
 ## Credits
 
+- Thanks again to <a href="https://www.pcbway.com" target="_b;ank">PCBWay</a> for sponsoring fabrication.
+  Their PCB manufacturing quality and service made it easy to bring the design from the schematic and layout to a finished, assembled board.
+  <br/>
 - Inspired by [MakeItForLess's Spotify Player](https://gitlab.com/makeitforless/spotify_controller)
